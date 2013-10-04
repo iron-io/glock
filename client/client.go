@@ -2,48 +2,74 @@ package glock
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
-	"log"
 	"net"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Client struct {
-	Endpoint string
+	conn net.Conn
 }
 
-func NewClient(endpoint string) *Client {
-	return &Client{endpoint}
+func NewClient(endpoint string) (*Client, error) {
+	conn, err := net.Dial("tcp", endpoint)
+	return &Client{conn}, err
 }
 
-func (c *Client) LockEx(key string, duration int) (id int) {
-	conn, err := net.Dial("tcp", c.Endpoint)
+func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
+	fmt.Fprintf(c.conn, "LOCK %s %d \r\n", key, int(duration/time.Millisecond))
+
+	splits, err := readResponse(c.conn)
 	if err != nil {
-		fmt.Println(err)
+		return id, err
 	}
-	fmt.Fprintf(conn, "LOCK %s %d \r\n", key, duration)
-	status, err := bufio.NewReader(conn).ReadString('\n')
+
+	id, err = strconv.ParseInt(splits[1], 10, 64)
 	if err != nil {
-		log.Fatalln(err)
+		return id, err
 	}
-	splits := strings.Split(strings.TrimRight(status, "\r\n"), " ")
-	id, err = strconv.Atoi(splits[1])
-	if err != nil {
-		log.Fatalln(err)
-	}
-	return id
+
+	return id, nil
 }
 
-func (c *Client) UnLock(key string, id int) {
-	conn, err := net.Dial("tcp", c.Endpoint)
+func (c *Client) Unlock(key string, id int64) (ok bool, err error) {
+	fmt.Fprintf(c.conn, "UNLOCK %s %d \r\n", key, id)
+
+	splits, err := readResponse(c.conn)
 	if err != nil {
-		fmt.Println(err)
+		return false, err
 	}
-	fmt.Fprintf(conn, "UNLOCK %s %d \r\n", key, id)
-	status, err := bufio.NewReader(conn).ReadString('\n')
+
+	cmd := splits[0]
+	switch cmd {
+	case "LOCKED":
+		ok = false
+	case "UNLOCKED":
+		ok = true
+	}
+
+	return ok, nil
+}
+
+func (c *Client) Close() error {
+	err := c.conn.Close()
+	return err
+}
+
+func readResponse(conn net.Conn) (splits []string, err error) {
+	response, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
-		log.Fatalln(err)
+		return []string{}, err
 	}
-	log.Println(status)
+
+	trimmedResponse := strings.TrimRight(response, "\r\n")
+	splits = strings.Split(trimmedResponse, " ")
+	if splits[0] == "ERROR" {
+		return []string{}, errors.New(trimmedResponse)
+	}
+
+	return splits, nil
 }
