@@ -32,12 +32,9 @@ func TestLockUnlock(t *testing.T) {
 		fmt.Println("2 got lock")
 
 		fmt.Println("2 releasing lock")
-		ok, err := client2.Unlock("x", id2)
+		err = client2.Unlock("x", id2)
 		if err != nil {
 			t.Error("Unexpected Unlock error: ", err)
-		}
-		if !ok {
-			t.Error("Unexpected Unlock error: unable to Unlock")
 		}
 		fmt.Println("2 released lock")
 		err = client2.Close()
@@ -47,16 +44,13 @@ func TestLockUnlock(t *testing.T) {
 	}()
 
 	fmt.Println("sleeping")
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 	fmt.Println("finished sleeping")
 
 	fmt.Println("1 releasing lock")
-	ok, err := client1.Unlock("x", id1)
+	err = client1.Unlock("x", id1)
 	if err != nil {
 		t.Error("Unexpected Unlock error: ", err)
-	}
-	if !ok {
-		t.Error("Unexpected Unlock error: unable to Unlock")
 	}
 
 	fmt.Println("1 released lock")
