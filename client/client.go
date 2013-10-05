@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -62,6 +63,7 @@ func (c *Client) Close() error {
 
 func (c *Client) readResponse() (splits []string, err error) {
 	response, err := c.reader.ReadString('\n')
+	log.Println("glockResponse: ", response)
 	if err != nil {
 		return nil, err
 	}
