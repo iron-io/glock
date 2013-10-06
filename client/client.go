@@ -12,17 +12,34 @@ import (
 )
 
 type Client struct {
-	conn   net.Conn
-	reader *bufio.Reader
+	endpoint string
+	conn     net.Conn
+	reader   *bufio.Reader
 }
 
 func NewClient(endpoint string) (*Client, error) {
 	conn, err := net.Dial("tcp", endpoint)
 	reader := bufio.NewReader(conn)
-	return &Client{conn, reader}, err
+	return &Client{endpoint, conn, reader}, err
+}
+
+func (c *Client) redial() error {
+	conn, err := net.Dial("tcp", c.endpoint)
+	if err != nil {
+		return err
+	}
+	c.conn = conn
+	c.reader = bufio.NewReader(conn)
+
+	return nil
 }
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
+	err = c.checkConn()
+	if err != nil {
+		return id, err
+	}
+
 	fmt.Fprintf(c.conn, "LOCK %s %d \r\n", key, int(duration/time.Millisecond))
 
 	splits, err := c.readResponse()
@@ -39,6 +56,11 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 }
 
 func (c *Client) Unlock(key string, id int64) (err error) {
+	err = c.checkConn()
+	if err != nil {
+		return err
+	}
+
 	fmt.Fprintf(c.conn, "UNLOCK %s %d \r\n", key, id)
 
 	splits, err := c.readResponse()
@@ -75,4 +97,17 @@ func (c *Client) readResponse() (splits []string, err error) {
 	}
 
 	return splits, nil
+}
+
+func (c *Client) checkConn() error {
+	buffer := make([]byte, 0)
+	_, err := c.conn.Read(buffer)
+	if err != nil {
+		c.Close()
+		err = c.redial()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
