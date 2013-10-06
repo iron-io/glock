@@ -62,6 +62,9 @@ func handleConn(conn net.Conn) {
 		// LOCK <key> <timeout>
 		case "LOCK":
 			timeout, err := strconv.Atoi(split[2])
+
+			log.Printf("Request: %-6s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
+
 			if err != nil {
 				conn.Write(errBadFormat)
 				continue
@@ -92,6 +95,9 @@ func handleConn(conn net.Conn) {
 		// UNLOCK <key> <id>
 		case "UNLOCK":
 			id, err := strconv.ParseInt(split[2], 10, 64)
+
+			log.Printf("Request: %-6s | Key:  %-15s | Id: %d", cmd, key, id)
+
 			if err != nil {
 				conn.Write(errBadFormat)
 				continue
