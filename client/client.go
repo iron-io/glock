@@ -24,6 +24,7 @@ func NewClient(endpoint string) (*Client, error) {
 }
 
 func (c *Client) redial() error {
+	c.Close()
 	conn, err := net.Dial("tcp", c.endpoint)
 	if err != nil {
 		return err
@@ -35,12 +36,10 @@ func (c *Client) redial() error {
 }
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
-	err = c.checkConn()
+	err = c.fprintf("LOCK %s %d \r\n", key, int(duration/time.Millisecond))
 	if err != nil {
 		return id, err
 	}
-
-	fmt.Fprintf(c.conn, "LOCK %s %d \r\n", key, int(duration/time.Millisecond))
 
 	splits, err := c.readResponse()
 	if err != nil {
@@ -56,12 +55,10 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 }
 
 func (c *Client) Unlock(key string, id int64) (err error) {
-	err = c.checkConn()
+	err = c.fprintf("UNLOCK %s %d \r\n", key, id)
 	if err != nil {
 		return err
 	}
-
-	fmt.Fprintf(c.conn, "UNLOCK %s %d \r\n", key, id)
 
 	splits, err := c.readResponse()
 	if err != nil {
@@ -99,14 +96,16 @@ func (c *Client) readResponse() (splits []string, err error) {
 	return splits, nil
 }
 
-func (c *Client) checkConn() error {
-	buffer := make([]byte, 0)
-	_, err := c.conn.Read(buffer)
-	if err != nil {
-		c.Close()
-		err = c.redial()
+func (c *Client) fprintf(format string, a ...interface{}) error {
+	for i := 0; i < 3; i++ {
+		_, err := fmt.Fprintf(c.conn, format, a...)
 		if err != nil {
-			return err
+			err = c.redial()
+			if err != nil {
+				return err
+			}
+		} else {
+			return nil
 		}
 	}
 	return nil
