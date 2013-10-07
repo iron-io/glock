@@ -62,3 +62,44 @@ func TestLockUnlock(t *testing.T) {
 
 	time.Sleep(5 * time.Second)
 }
+
+func TestConnectionDrop(t *testing.T) {
+	client1, err := NewClient("localhost:45625")
+	if err != nil {
+		t.Error("Unexpected new client error: ", err)
+	}
+
+	fmt.Println("closing connection")
+	err = client1.Close()
+	if err != nil {
+		t.Error("Unexpected connection close error: ", err)
+	}
+	fmt.Println("closed connection")
+
+	fmt.Println("1 getting lock")
+	id1, err := client1.Lock("x", 1*time.Second)
+	if err != nil {
+		t.Error("Unexpected lock error: ", err)
+	}
+	fmt.Println("1 got lock")
+
+	fmt.Println("closing connection")
+	err = client1.Close()
+	if err != nil {
+		t.Error("Unexpected connection close error: ", err)
+	}
+	fmt.Println("closed connection")
+
+	fmt.Println("1 releasing lock")
+	err = client1.Unlock("x", id1)
+	if err != nil {
+		t.Error("Unexpected Unlock error: ", err)
+	}
+	fmt.Println("1 released lock")
+
+	err = client1.Close()
+	if err != nil {
+		t.Error("Unexpected connection close error: ", err)
+	}
+
+}
