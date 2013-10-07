@@ -63,8 +63,6 @@ func handleConn(conn net.Conn) {
 		case "LOCK":
 			timeout, err := strconv.Atoi(split[2])
 
-			log.Printf("Request: %-6s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
-
 			if err != nil {
 				conn.Write(errBadFormat)
 				continue
@@ -92,11 +90,12 @@ func handleConn(conn net.Conn) {
 			})
 			fmt.Fprintf(conn, "LOCKED %v\r\n", id)
 
+			log.Printf("Request:  %-12s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
+			log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "LOCKED", key, id)
+
 		// UNLOCK <key> <id>
 		case "UNLOCK":
 			id, err := strconv.ParseInt(split[2], 10, 64)
-
-			log.Printf("Request: %-6s | Key:  %-15s | Id: %d", cmd, key, id)
 
 			if err != nil {
 				conn.Write(errBadFormat)
@@ -107,13 +106,22 @@ func handleConn(conn net.Conn) {
 			locksLock.RUnlock()
 			if !ok {
 				conn.Write(errLockNotFound)
+
+				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+				log.Printf("Response: %-12s | Key:  %-15s", "404", key)
 				continue
 			}
 			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 				lock.mutex.Unlock()
 				conn.Write(unlockedResponse)
+
+				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
 			} else {
-				conn.Write(lockedResponse)
+				conn.Write(notUnlockedResponse)
+
+				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "NOT_UNLOCKED", key, id)
 			}
 
 		default:
