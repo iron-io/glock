@@ -13,15 +13,20 @@ import (
 
 type Client struct {
 	endpoint       string
-	conn           net.Conn
-	connectionPool chan net.Conn
+	connectionPool chan *connection
+}
+
+type connection struct {
+	endpoint string
+	conn     net.Conn
+	reader   *bufio.Reader
 }
 
 func (c *Client) ClosePool() error {
 	size := len(c.connectionPool)
 	for x := 0; x < size; x++ {
-		conn := <-c.connectionPool
-		err := conn.Close()
+		connection := <-c.connectionPool
+		err := connection.Close()
 		if err != nil {
 			return err
 		}
@@ -41,58 +46,35 @@ func NewClient(endpoint string, size int) (*Client, error) {
 }
 
 func (c *Client) initPool(size int) error {
-	c.connectionPool = make(chan net.Conn, size)
+	c.connectionPool = make(chan *connection, size)
 	for x := 0; x < size; x++ {
 		conn, err := net.Dial("tcp", c.endpoint)
 		if err != nil {
 			return err
 		}
-
-		c.connectionPool <- conn
+		c.connectionPool <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}
 	}
 	return nil
 }
 
-func (c *Client) getConnection() error {
-	if len(c.connectionPool) == 0 {
-		conn, err := net.Dial("tcp", c.endpoint)
-		if err != nil {
-			return err
-		}
-		c.conn = conn
-		return nil
-	}
-	conn := <-c.connectionPool
-	c.conn = conn
-	return nil
+func (c *Client) getConnection() *connection {
+	return <-c.connectionPool
 }
 
-func (c *Client) releaseConnection() {
-	c.connectionPool <- c.conn
-	c.conn = nil
-}
-
-func (c *Client) redial() error {
-	c.conn.Close()
-	conn, err := net.Dial("tcp", c.endpoint)
-	if err != nil {
-		return err
-	}
-	c.conn = conn
-
-	return nil
+func (c *Client) releaseConnection(connection *connection) {
+	c.connectionPool <- connection
 }
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
-	c.getConnection()
-	defer c.releaseConnection()
+	connection := c.getConnection()
+	defer c.releaseConnection(connection)
 
-	err = c.fprintf("LOCK %s %d \r\n", key, int(duration/time.Millisecond))
+	err = connection.fprintf("LOCK %s %d \r\n", key, int(duration/time.Millisecond))
 	if err != nil {
 		return id, err
 	}
 
-	splits, err := c.readResponse()
+	splits, err := connection.readResponse()
 	if err != nil {
 		return id, err
 	}
@@ -106,15 +88,15 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 }
 
 func (c *Client) Unlock(key string, id int64) (err error) {
-	c.getConnection()
-	defer c.releaseConnection()
+	connection := c.getConnection()
+	defer c.releaseConnection(connection)
 
-	err = c.fprintf("UNLOCK %s %d \r\n", key, id)
+	err = connection.fprintf("UNLOCK %s %d \r\n", key, id)
 	if err != nil {
 		return err
 	}
 
-	splits, err := c.readResponse()
+	splits, err := connection.readResponse()
 	if err != nil {
 		return err
 	}
@@ -129,9 +111,34 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 	return errors.New("Unknown reponse format")
 }
 
-func (c *Client) readResponse() (splits []string, err error) {
-	reader := bufio.NewReader(c.conn)
-	response, err := reader.ReadString('\n')
+func (c *connection) fprintf(format string, a ...interface{}) error {
+	for i := 0; i < 3; i++ {
+		_, err := fmt.Fprintf(c.conn, format, a...)
+		if err != nil {
+			err = c.redial()
+			if err != nil {
+				return err
+			}
+		} else {
+			return nil
+		}
+	}
+	return nil
+}
+func (c *connection) redial() error {
+	c.conn.Close()
+	conn, err := net.Dial("tcp", c.endpoint)
+	if err != nil {
+		return err
+	}
+	c.conn = conn
+	c.reader = bufio.NewReader(conn)
+
+	return nil
+}
+
+func (c *connection) readResponse() (splits []string, err error) {
+	response, err := c.reader.ReadString('\n')
 	log.Println("glockResponse: ", response)
 	if err != nil {
 		return nil, err
@@ -146,17 +153,11 @@ func (c *Client) readResponse() (splits []string, err error) {
 	return splits, nil
 }
 
-func (c *Client) fprintf(format string, a ...interface{}) error {
-	for i := 0; i < 3; i++ {
-		_, err := fmt.Fprintf(c.conn, format, a...)
-		if err != nil {
-			err = c.redial()
-			if err != nil {
-				return err
-			}
-		} else {
-			return nil
-		}
+func (c *connection) Close() error {
+	c.reader = nil
+	err := c.conn.Close()
+	if err != nil {
+		return err
 	}
 	return nil
 }

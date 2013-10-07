@@ -58,10 +58,7 @@ func TestConnectionDrop(t *testing.T) {
 	}
 
 	fmt.Println("closing connection")
-	err = client1.ClosePool()
-	if err != nil {
-		t.Error("Unexpected connection close error: ", err)
-	}
+	client1.testClose()
 	fmt.Println("closed connection")
 
 	fmt.Println("1 getting lock")
@@ -71,13 +68,6 @@ func TestConnectionDrop(t *testing.T) {
 	}
 	fmt.Println("1 got lock")
 
-	fmt.Println("closing connection")
-	err = client1.ClosePool()
-	if err != nil {
-		t.Error("Unexpected connection close error: ", err)
-	}
-	fmt.Println("closed connection")
-
 	fmt.Println("1 releasing lock")
 	err = client1.Unlock("x", id1)
 	if err != nil {
@@ -85,9 +75,16 @@ func TestConnectionDrop(t *testing.T) {
 	}
 	fmt.Println("1 released lock")
 
-	err = client1.ClosePool()
-	if err != nil {
-		t.Error("Unexpected connection close error: ", err)
-	}
+	client1.testClose()
 
+}
+
+// This is used to simulate dropped out or bad connections in the connection pool
+func (c *Client) testClose() {
+	size := len(c.connectionPool)
+	for x := 0; x < size; x++ {
+		connection := <-c.connectionPool
+		connection.Close()
+		c.connectionPool <- connection
+	}
 }
