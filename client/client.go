@@ -125,17 +125,6 @@ func (c *connection) fprintf(format string, a ...interface{}) error {
 	}
 	return nil
 }
-func (c *connection) redial() error {
-	c.conn.Close()
-	conn, err := net.Dial("tcp", c.endpoint)
-	if err != nil {
-		return err
-	}
-	c.conn = conn
-	c.reader = bufio.NewReader(conn)
-
-	return nil
-}
 
 func (c *connection) readResponse() (splits []string, err error) {
 	response, err := c.reader.ReadString('\n')
@@ -153,11 +142,19 @@ func (c *connection) readResponse() (splits []string, err error) {
 	return splits, nil
 }
 
-func (c *connection) Close() error {
-	c.reader = nil
-	err := c.conn.Close()
+func (c *connection) redial() error {
+	c.conn.Close()
+	conn, err := net.Dial("tcp", c.endpoint)
 	if err != nil {
 		return err
 	}
+	c.conn = conn
+	c.reader = bufio.NewReader(conn)
+
 	return nil
+}
+
+func (c *connection) Close() error {
+	c.reader = nil
+	return c.conn.Close()
 }
