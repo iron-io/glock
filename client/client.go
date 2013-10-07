@@ -67,8 +67,8 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 
 	cmd := splits[0]
 	switch cmd {
-	case "LOCKED":
-		return errors.New("LOCKED")
+	case "NOT_UNLOCKED":
+		return errors.New("NOT_UNLOCKED")
 	case "UNLOCKED":
 		return nil
 	}

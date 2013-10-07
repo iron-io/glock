@@ -40,8 +40,8 @@ func main() {
 }
 
 var (
-	lockedResponse   = []byte("LOCKED\r\n")
-	unlockedResponse = []byte("UNLOCKED\r\n")
+	unlockedResponse    = []byte("UNLOCKED\r\n")
+	notUnlockedResponse = []byte("NOT_UNLOCKED\r\n")
 
 	errBadFormat      = []byte("ERROR bad command format\r\n")
 	errUnknownCommand = []byte("ERROR unknown command\r\n")
@@ -113,7 +113,7 @@ func handleConn(conn net.Conn) {
 				lock.mutex.Unlock()
 				conn.Write(unlockedResponse)
 			} else {
-				conn.Write(lockedResponse)
+				conn.Write(notUnlockedResponse)
 			}
 
 		default:
