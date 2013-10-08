@@ -3,9 +3,9 @@ package glock
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
-	"sync"
 )
 
 func TestLockUnlock(t *testing.T) {
@@ -100,7 +100,7 @@ func TestConcurrency(t *testing.T) {
 	k := 'a'
 	for i := 0; i < 1000; i++ {
 		fmt.Println("Value of i is now:", i)
-		if i > 0 && i % 50 == 0 {
+		if i > 0 && i%50 == 0 {
 			k += 1
 		}
 		wg.Add(1)
