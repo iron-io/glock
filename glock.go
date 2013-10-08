@@ -87,6 +87,7 @@ func handleConn(conn net.Conn) {
 				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 					lock.mutex.Unlock()
 				}
+				log.Printf("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
 			})
 			fmt.Fprintf(conn, "LOCKED %v\r\n", id)
 
