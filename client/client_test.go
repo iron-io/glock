@@ -2,8 +2,10 @@ package glock
 
 import (
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
+	"sync"
 )
 
 func TestLockUnlock(t *testing.T) {
@@ -87,4 +89,40 @@ func (c *Client) testClose() {
 		connection.Close()
 		c.connectionPool <- connection
 	}
+}
+
+func TestConcurrency(t *testing.T) {
+	client1, err := NewClient("localhost:45625", 100)
+	if err != nil {
+		t.Error("Unexpected new client error: ", err)
+	}
+	var wg sync.WaitGroup
+	k := 'a'
+	for i := 0; i < 1000; i++ {
+		fmt.Println("Value of i is now:", i)
+		if i > 0 && i % 50 == 0 {
+			k += 1
+		}
+		wg.Add(1)
+		go func(ii int, key string) {
+			defer wg.Done()
+			fmt.Println("goroutine: ", ii, "getting lock", key)
+			id1, err := client1.Lock(key, 100*time.Millisecond)
+			if err != nil {
+				t.Error("goroutine: ", ii, "Unexpected lock error: ", err)
+			}
+			fmt.Println("goroutine: ", ii, "GOT LOCK", key)
+			time.Sleep(time.Duration(rand.Intn(120)) * time.Millisecond)
+			fmt.Println("goroutine: ", ii, "releasing lock", key)
+			err = client1.Unlock(key, id1)
+			if err != nil {
+				t.Error("Unexpected Unlock error: ", err)
+			}
+			fmt.Println("goroutine: ", ii, "released lock", key)
+		}(i, string(k))
+	}
+	fmt.Println("waiting for waitgroup...")
+	wg.Wait()
+	fmt.Println("Done waiting for waitgroup")
+
 }
