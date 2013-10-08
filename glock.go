@@ -93,7 +93,6 @@ func handleConn(conn net.Conn) {
 					}
 				}()
 				lock.mutex.Unlock()
-
 			})
 			fmt.Fprintf(conn, "LOCKED %v\r\n", id)
 
@@ -119,13 +118,16 @@ func handleConn(conn net.Conn) {
 				continue
 			}
 			if true { // atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-				defer func() {
-					if r := recover(); r != nil {
-						fmt.Println("Recovered after bad unlock", r)
-					}
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							fmt.Println("Recovered after bad unlock", r)
+							conn.Write(unlockedResponse)
+						}
+					}()
+					lock.mutex.Unlock()
+					conn.Write(unlockedResponse)
 				}()
-				lock.mutex.Unlock()
-				conn.Write(unlockedResponse)
 
 				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
 				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)

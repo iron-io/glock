@@ -116,7 +116,7 @@ func TestConcurrency(t *testing.T) {
 			fmt.Println("goroutine: ", ii, "releasing lock", key)
 			err = client1.Unlock(key, id1)
 			if err != nil {
-				t.Error("Unexpected Unlock error: ", err)
+				t.Error("goroutine: ", ii, "Unexpected Unlock error: ", err)
 			}
 			fmt.Println("goroutine: ", ii, "released lock", key)
 		}(i, string(k))
