@@ -92,13 +92,16 @@ func (c *Client) testClose() {
 }
 
 func TestConcurrency(t *testing.T) {
-	client1, err := NewClient("localhost:45625", 100)
+	// todo: should document deadlock situation if concurrency in app is more than the number of connections in glock.
+	// Or glock should just make new connections if none available. This is probably better way.
+	concurrency := 500
+	client1, err := NewClient("localhost:45625", concurrency)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
 	var wg sync.WaitGroup
 	k := 'a'
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < concurrency; i++ {
 		fmt.Println("Value of i is now:", i)
 		if i > 0 && i%50 == 0 {
 			k += 1
@@ -107,12 +110,12 @@ func TestConcurrency(t *testing.T) {
 		go func(ii int, key string) {
 			defer wg.Done()
 			fmt.Println("goroutine: ", ii, "getting lock", key)
-			id1, err := client1.Lock(key, 250*time.Millisecond)
+			id1, err := client1.Lock(key, 10000*time.Millisecond)
 			if err != nil {
 				t.Error("goroutine: ", ii, "Unexpected lock error: ", err)
 			}
 			fmt.Println("goroutine: ", ii, "GOT LOCK", key)
-			time.Sleep(time.Duration(rand.Intn(60)) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
 			fmt.Println("goroutine: ", ii, "releasing lock", key)
 			err = client1.Unlock(key, id1)
 			if err != nil {

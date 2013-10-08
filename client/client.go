@@ -19,7 +19,7 @@ type Client struct {
 type connection struct {
 	endpoint string
 	conn     net.Conn
-	reader   *bufio.Reader
+	//	reader   *bufio.Reader
 }
 
 func (c *Client) ClosePool() error {
@@ -52,7 +52,7 @@ func (c *Client) initPool(size int) error {
 		if err != nil {
 			return err
 		}
-		c.connectionPool <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}
+		c.connectionPool <- &connection{conn: conn, endpoint: c.endpoint}
 	}
 	return nil
 }
@@ -127,7 +127,8 @@ func (c *connection) fprintf(format string, a ...interface{}) error {
 }
 
 func (c *connection) readResponse() (splits []string, err error) {
-	response, err := c.reader.ReadString('\n')
+	reader := bufio.NewReader(c.conn)
+	response, err := reader.ReadString('\n')
 	log.Println("glockResponse: ", response)
 	if err != nil {
 		return nil, err
@@ -149,12 +150,9 @@ func (c *connection) redial() error {
 		return err
 	}
 	c.conn = conn
-	c.reader = bufio.NewReader(conn)
-
 	return nil
 }
 
 func (c *connection) Close() error {
-	c.reader = nil
 	return c.conn.Close()
 }

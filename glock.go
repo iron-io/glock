@@ -16,6 +16,17 @@ import (
 type timeoutLock struct {
 	mutex sync.Mutex
 	id    int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
+	timer *time.Timer
+}
+
+func (l *timeoutLock) Unlock() {
+	l.timer.Stop()
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered after bad unlock", r)
+		}
+	}()
+	l.mutex.Unlock()
 }
 
 var locksLock sync.RWMutex
@@ -51,7 +62,9 @@ var (
 func handleConn(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
-		split := strings.Fields(scanner.Text())
+		line := scanner.Text()
+		log.Println("IN:", line)
+		split := strings.Fields(line)
 		if len(split) < 3 {
 			conn.Write(errBadFormat)
 			continue
@@ -62,7 +75,6 @@ func handleConn(conn net.Conn) {
 		// LOCK <key> <timeout>
 		case "LOCK":
 			timeout, err := strconv.Atoi(split[2])
-
 			if err != nil {
 				conn.Write(errBadFormat)
 				continue
@@ -83,16 +95,9 @@ func handleConn(conn net.Conn) {
 
 			lock.mutex.Lock()
 			id := atomic.AddInt64(&lock.id, 1)
-			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
+			lock.timer = time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
 				log.Printf("Timedout: %-12d | Key: %-15s | Id: %d", timeout, key, id)
-
-				//if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-				defer func() {
-					if r := recover(); r != nil {
-						fmt.Println("Recovered after bad unlock", r)
-					}
-				}()
-				lock.mutex.Unlock()
+				lock.Unlock()
 			})
 			fmt.Fprintf(conn, "LOCKED %v\r\n", id)
 
@@ -102,7 +107,7 @@ func handleConn(conn net.Conn) {
 		// UNLOCK <key> <id>
 		case "UNLOCK":
 			id, err := strconv.ParseInt(split[2], 10, 64)
-
+			log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
 			if err != nil {
 				conn.Write(errBadFormat)
 				continue
@@ -110,33 +115,15 @@ func handleConn(conn net.Conn) {
 			locksLock.RLock()
 			lock, ok := locks[key]
 			locksLock.RUnlock()
+
 			if !ok {
 				conn.Write(errLockNotFound)
-
-				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
 				log.Printf("Response: %-12s | Key:  %-15s", "404", key)
 				continue
 			}
-			if true { // atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							fmt.Println("Recovered after bad unlock", r)
-							conn.Write(unlockedResponse)
-						}
-					}()
-					lock.mutex.Unlock()
-					conn.Write(unlockedResponse)
-				}()
-
-				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
-			} else {
-				conn.Write(notUnlockedResponse)
-
-				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "NOT_UNLOCKED", key, id)
-			}
+			lock.Unlock()
+			conn.Write(unlockedResponse)
+			log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
 
 		default:
 			conn.Write(errUnknownCommand)
