@@ -84,10 +84,16 @@ func handleConn(conn net.Conn) {
 			lock.mutex.Lock()
 			id := atomic.AddInt64(&lock.id, 1)
 			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
-				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-					lock.mutex.Unlock()
-					log.Printf("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
-				}
+				log.Printf("Timedout: %-12d | Key: %-15s | Id: %d", timeout, key, id)
+
+				//if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Println("Recovered after bad unlock", r)
+					}
+				}()
+				lock.mutex.Unlock()
+
 			})
 			fmt.Fprintf(conn, "LOCKED %v\r\n", id)
 
@@ -112,7 +118,12 @@ func handleConn(conn net.Conn) {
 				log.Printf("Response: %-12s | Key:  %-15s", "404", key)
 				continue
 			}
-			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+			if true { // atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Println("Recovered after bad unlock", r)
+					}
+				}()
 				lock.mutex.Unlock()
 				conn.Write(unlockedResponse)
 
