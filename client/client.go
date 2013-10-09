@@ -127,7 +127,7 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 	case "UNLOCKED":
 		return nil
 	}
-	return errors.New("Unknown reponse format")
+	return errors.New("Unknown response format")
 }
 
 func (c *connection) fprintf(format string, a ...interface{}) error {
