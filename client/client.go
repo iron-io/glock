@@ -47,11 +47,12 @@ func NewClient(endpoint string, size int) (*Client, error) {
 func (c *Client) initPool(size int) error {
 	c.connectionPool = make(chan *connection, size)
 	for x := 0; x < size; x++ {
-		conn, err := net.Dial("tcp", c.endpoint)
+		c2 := &connection{endpoint: c.endpoint}
+		err := c2.dial()
 		if err != nil {
-			return err
+		  return err	
 		}
-		c.connectionPool <- &connection{conn: conn, endpoint: c.endpoint}
+		c.connectionPool <- c2
 	}
 	return nil
 }
@@ -84,7 +85,7 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 	}
 	defer c.releaseConnection(connection)
 
-	err = connection.fprintf("LOCK %s %d \r\n", key, int(duration/time.Millisecond))
+	err = connection.fprintf("LOCK %s %d\n", key, int(duration/time.Millisecond))
 	if err != nil {
 		return id, err
 	}
@@ -109,7 +110,7 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 	}
 	defer c.releaseConnection(connection)
 
-	err = connection.fprintf("UNLOCK %s %d \r\n", key, id)
+	err = connection.fprintf("UNLOCK %s %d\n", key, id)
 	if err != nil {
 		return err
 	}
@@ -138,9 +139,10 @@ func (c *connection) fprintf(format string, a ...interface{}) error {
 				return err
 			}
 		} else {
-			return nil
+			break
 		}
 	}
+  //c.conn.SetReadDeadline(time.Now().Add(2000 * time.Millisecond))
 	return nil
 }
 
@@ -152,7 +154,7 @@ func (c *connection) readResponse() (splits []string, err error) {
 		return nil, err
 	}
 
-	trimmedResponse := strings.TrimRight(response, "\r\n")
+	trimmedResponse := strings.TrimRight(response, "\n")
 	splits = strings.Split(trimmedResponse, " ")
 	if splits[0] == "ERROR" {
 		return nil, errors.New(trimmedResponse)
@@ -161,13 +163,21 @@ func (c *connection) readResponse() (splits []string, err error) {
 	return splits, nil
 }
 
+func (c *connection) dial() (error) {
+ conn, err := net.Dial("tcp", c.endpoint)
+		if err != nil {
+			return err
+		}
+	c.conn = conn
+	return nil
+}
+
 func (c *connection) redial() error {
 	c.conn.Close()
-	conn, err := net.Dial("tcp", c.endpoint)
+	err := c.dial()
 	if err != nil {
 		return err
 	}
-	c.conn = conn
 	return nil
 }
 

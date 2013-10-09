@@ -94,8 +94,8 @@ func (c *Client) testClose() {
 func TestConcurrency(t *testing.T) {
 	// todo: should document deadlock situation if concurrency in app is more than the number of connections in glock.
 	// Or glock should just make new connections if none available. This is probably better way.
-	concurrency := 500
-	client1, err := NewClient("localhost:45625", concurrency)
+	concurrency := 400
+	client1, err := NewClient("ec2-54-224-96-21.compute-1.amazonaws.com:45625", concurrency)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
