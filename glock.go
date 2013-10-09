@@ -2,16 +2,57 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"log/syslog"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/iron-io/golog"
 )
+
+type Config struct {
+	Logging struct {
+		To     string `json:"to"`
+		Level  string `json:"level"`
+		Prefix string `json:"prefix"`
+	}
+}
+
+func SetLogLevel(level string) {
+	switch level {
+	case "debug":
+		golog.DefaultLogger.Level = golog.Debug
+	case "warn":
+		golog.DefaultLogger.Level = golog.Warn
+	case "error":
+		golog.DefaultLogger.Level = golog.Error
+	default:
+		golog.DefaultLogger.Level = golog.Info
+	}
+}
+
+func SetLogLocation(to, prefix string) {
+	switch to {
+	case "":
+	case "papertrail":
+		to = "logs.papertrailapp.com:22034"
+		fallthrough
+	default:
+		writer, err := syslog.Dial("udp", to, syslog.LOG_INFO, prefix)
+		if err != nil {
+			log.Fatalln("unable to connect to Papertrail:", err)
+		}
+		log.SetOutput(writer)
+	}
+}
 
 type timeoutLock struct {
 	mutex sync.Mutex
@@ -30,10 +71,15 @@ func main() {
 		log.Fatalln("error listening", err)
 	}
 
+	var config Config
+	LoadConfig("ironmq", "config.json", &config)
+	SetLogLevel(config.Logging.Level)
+	SetLogLocation(config.Logging.To, config.Logging.Prefix)
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Println("error accepting", err)
+			golog.Errorln("error accepting", err)
 			return
 		}
 		go authConn(conn)
@@ -112,13 +158,13 @@ func handleConn(conn net.Conn) {
 			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
 				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 					lock.mutex.Unlock()
-					log.Printf("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
+					golog.Infof("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
 				}
 			})
 			fmt.Fprintf(conn, "LOCKED %v\n", id)
 
-			log.Printf("Request:  %-12s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
-			log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "LOCKED", key, id)
+			golog.Infof("Request:  %-12s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
+			golog.Infof("Response: %-12s | Key:  %-15s | Id: %d", "LOCKED", key, id)
 
 		// UNLOCK <key> <id>
 		case "UNLOCK":
@@ -134,21 +180,21 @@ func handleConn(conn net.Conn) {
 			if !ok {
 				conn.Write(errLockNotFound)
 
-				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				log.Printf("Response: %-12s | Key:  %-15s", "404", key)
+				golog.Infof("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+				golog.Infof("Response: %-12s | Key:  %-15s", "404", key)
 				continue
 			}
 			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 				lock.mutex.Unlock()
 				conn.Write(unlockedResponse)
 
-				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
+				golog.Infof("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+				golog.Infof("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
 			} else {
 				conn.Write(notUnlockedResponse)
 
-				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "NOT_UNLOCKED", key, id)
+				golog.Infof("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+				golog.Infof("Response: %-12s | Key:  %-15s | Id: %d", "NOT_UNLOCKED", key, id)
 			}
 
 		default:
@@ -156,4 +202,17 @@ func handleConn(conn net.Conn) {
 			continue
 		}
 	}
+}
+
+func LoadConfig(dir, configFile string, config interface{}) {
+	config_s, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		log.Fatalln("Couldn't find config at:", configFile)
+	}
+
+	err = json.Unmarshal(config_s, &config)
+	if err != nil {
+		log.Fatalln("Couldn't unmarshal config!", err)
+	}
+	golog.Infoln("config:", config)
 }
