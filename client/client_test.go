@@ -92,13 +92,13 @@ func (c *Client) testClose() {
 }
 
 func TestConcurrency(t *testing.T) {
-	client1, err := NewClient("localhost:45625", 100)
+	client1, err := NewClient("ec2-54-224-96-21.compute-1.amazonaws.com:45625", 100)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
 	var wg sync.WaitGroup
 	k := 'a'
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		fmt.Println("Value of i is now:", i)
 		if i > 0 && i%50 == 0 {
 			k += 1

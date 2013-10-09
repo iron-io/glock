@@ -85,7 +85,7 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 	}
 	defer c.releaseConnection(connection)
 
-	err = connection.fprintf("LOCK %s %d \r\n", key, int(duration/time.Millisecond))
+	err = connection.fprintf("LOCK %s %d\n", key, int(duration/time.Millisecond))
 	if err != nil {
 		return id, err
 	}
@@ -110,7 +110,7 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 	}
 	defer c.releaseConnection(connection)
 
-	err = connection.fprintf("UNLOCK %s %d \r\n", key, id)
+	err = connection.fprintf("UNLOCK %s %d\n", key, id)
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func (c *connection) readResponse() (splits []string, err error) {
 		return nil, err
 	}
 
-	trimmedResponse := strings.TrimRight(response, "\r\n")
+	trimmedResponse := strings.TrimRight(response, "\n")
 	splits = strings.Split(trimmedResponse, " ")
 	if splits[0] == "ERROR" {
 		return nil, errors.New(trimmedResponse)

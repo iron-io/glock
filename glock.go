@@ -40,12 +40,12 @@ func main() {
 }
 
 var (
-	unlockedResponse    = []byte("UNLOCKED\r\n")
-	notUnlockedResponse = []byte("NOT_UNLOCKED\r\n")
+	unlockedResponse    = []byte("UNLOCKED\n")
+	notUnlockedResponse = []byte("NOT_UNLOCKED\n")
 
-	errBadFormat      = []byte("ERROR bad command format\r\n")
-	errUnknownCommand = []byte("ERROR unknown command\r\n")
-	errLockNotFound   = []byte("ERROR lock not found\r\n")
+	errBadFormat      = []byte("ERROR bad command format\n")
+	errUnknownCommand = []byte("ERROR unknown command\n")
+	errLockNotFound   = []byte("ERROR lock not found\n")
 )
 
 func handleConn(conn net.Conn) {
@@ -89,7 +89,7 @@ func handleConn(conn net.Conn) {
 					log.Printf("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
 				}
 			})
-			fmt.Fprintf(conn, "LOCKED %v\r\n", id)
+			fmt.Fprintf(conn, "LOCKED %v\n", id)
 
 			log.Printf("Request:  %-12s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
 			log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "LOCKED", key, id)
