@@ -92,7 +92,7 @@ func (c *Client) testClose() {
 }
 
 func TestConcurrency(t *testing.T) {
-	client1, err := NewClient("ec2-54-224-96-21.compute-1.amazonaws.com:45625", 100)
+	client1, err := NewClient("localhost:45625", 100)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
