@@ -115,7 +115,6 @@ func handleConn(conn net.Conn) {
 			locksLock.RLock()
 			lock, ok := locks[key]
 			locksLock.RUnlock()
-
 			if !ok {
 				conn.Write(errLockNotFound)
 				log.Printf("Response: %-12s | Key:  %-15s", "404", key)

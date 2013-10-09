@@ -19,7 +19,6 @@ type Client struct {
 type connection struct {
 	endpoint string
 	conn     net.Conn
-	//	reader   *bufio.Reader
 }
 
 func (c *Client) ClosePool() error {
@@ -66,7 +65,7 @@ func (c *Client) getConnection() (*connection, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}, nil
+		return &connection{conn: conn, endpoint: c.endpoint}, nil
 	}
 }
 
