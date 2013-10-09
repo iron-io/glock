@@ -99,6 +99,8 @@ func TestConcurrency(t *testing.T) {
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
+	// map of slices to track who got what and in what order
+	orders := make(map[string][]int)
 	var wg sync.WaitGroup
 	k := 'a'
 	for i := 0; i < concurrency; i++ {
@@ -110,12 +112,13 @@ func TestConcurrency(t *testing.T) {
 		go func(ii int, key string) {
 			defer wg.Done()
 			fmt.Println("goroutine: ", ii, "getting lock", key)
-			id1, err := client1.Lock(key, 10000*time.Millisecond)
+			id1, err := client1.Lock(key, 1000*time.Millisecond)
 			if err != nil {
 				t.Error("goroutine: ", ii, "Unexpected lock error: ", err)
 			}
 			fmt.Println("goroutine: ", ii, "GOT LOCK", key)
-			time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
+			orders[key] = append(orders["key"], ii)
+			time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond)
 			fmt.Println("goroutine: ", ii, "releasing lock", key)
 			err = client1.Unlock(key, id1)
 			if err != nil {
@@ -129,5 +132,6 @@ func TestConcurrency(t *testing.T) {
 	fmt.Println("waiting for waitgroup...")
 	wg.Wait()
 	fmt.Println("Done waiting for waitgroup")
+	fmt.Println("Orders:", orders)
 
 }

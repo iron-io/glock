@@ -99,6 +99,7 @@ func handleConn(conn net.Conn) {
 				log.Printf("Timedout: %-12d | Key: %-15s | Id: %d", timeout, key, id)
 				lock.Unlock()
 			})
+
 			fmt.Fprintf(conn, "LOCKED %v\n", id)
 
 			log.Printf("Request:  %-12s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
