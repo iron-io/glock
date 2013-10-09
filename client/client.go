@@ -57,16 +57,32 @@ func (c *Client) initPool(size int) error {
 	return nil
 }
 
-func (c *Client) getConnection() *connection {
-	return <-c.connectionPool
+func (c *Client) getConnection() (*connection, error) {
+	select {
+	case conn := <-c.connectionPool:
+		return conn, nil
+	default:
+		conn, err := net.Dial("tcp", c.endpoint)
+		if err != nil {
+			return nil, err
+		}
+		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}, nil
+	}
 }
 
 func (c *Client) releaseConnection(connection *connection) {
-	c.connectionPool <- connection
+	select {
+	case c.connectionPool <- connection:
+	default:
+		connection.Close()
+	}
 }
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
-	connection := c.getConnection()
+	connection, err := c.getConnection()
+	if err != nil {
+		return id, err
+	}
 	defer c.releaseConnection(connection)
 
 	err = connection.fprintf("LOCK %s %d \r\n", key, int(duration/time.Millisecond))
@@ -88,7 +104,10 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 }
 
 func (c *Client) Unlock(key string, id int64) (err error) {
-	connection := c.getConnection()
+	connection, err := c.getConnection()
+	if err != nil {
+		return err
+	}
 	defer c.releaseConnection(connection)
 
 	err = connection.fprintf("UNLOCK %s %d \r\n", key, id)
