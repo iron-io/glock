@@ -12,8 +12,8 @@ import (
 )
 
 type Client struct {
-	endpoint       string
-	connectionPool chan *connection
+	endpoint string
+	iq       *SliceIQ
 }
 
 type connection struct {
@@ -23,9 +23,9 @@ type connection struct {
 }
 
 func (c *Client) ClosePool() error {
-	size := len(c.connectionPool)
-	for x := 0; x < size; x++ {
-		connection := <-c.connectionPool
+	// todo: iterate through next channel and close them all without returning them to the pool
+	c.iq.Close()
+	for connection := range c.iq.poolOut {
 		err := connection.Close()
 		if err != nil {
 			return err
@@ -46,36 +46,33 @@ func NewClient(endpoint string, size int) (*Client, error) {
 }
 
 func (c *Client) initPool(size int) error {
-	c.connectionPool = make(chan *connection, size)
-	for x := 0; x < size; x++ {
-		conn, err := net.Dial("tcp", c.endpoint)
-		if err != nil {
-			return err
-		}
-		c.connectionPool <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}
+	c.iq = NewSliceIQ()
+	go c.iq.Start()
+	conn, err := net.Dial("tcp", c.endpoint)
+	if err != nil {
+		return err
 	}
+	c.iq.poolIn <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}
 	return nil
 }
 
 func (c *Client) getConnection() (*connection, error) {
 	select {
-	case conn := <-c.connectionPool:
+	case conn := <-c.iq.poolOut:
 		return conn, nil
 	default:
+		log.Println("Making new connection")
 		conn, err := net.Dial("tcp", c.endpoint)
 		if err != nil {
 			return nil, err
 		}
-		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}, nil
+		conn2 := &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}
+		return conn2, nil
 	}
 }
 
 func (c *Client) releaseConnection(connection *connection) {
-	select {
-	case c.connectionPool <- connection:
-	default:
-		connection.Close()
-	}
+	c.iq.poolIn <- connection
 }
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {

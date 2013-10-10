@@ -11,7 +11,7 @@ import (
 func TestLockUnlock(t *testing.T) {
 	client1, err := NewClient("localhost:45625", 10)
 	if err != nil {
-		t.Error("Unexpected new client error: ", err)
+		t.Fatal("Unexpected new client error: ", err)
 	}
 
 	fmt.Println("1 getting lock")
@@ -56,7 +56,7 @@ func TestLockUnlock(t *testing.T) {
 func TestConnectionDrop(t *testing.T) {
 	client1, err := NewClient("localhost:45625", 10)
 	if err != nil {
-		t.Error("Unexpected new client error: ", err)
+		t.Fatal("Unexpected new client error: ", err)
 	}
 
 	fmt.Println("closing connection")
@@ -83,18 +83,17 @@ func TestConnectionDrop(t *testing.T) {
 
 // This is used to simulate dropped out or bad connections in the connection pool
 func (c *Client) testClose() {
-	size := len(c.connectionPool)
-	for x := 0; x < size; x++ {
-		connection := <-c.connectionPool
+	for x := 0; x < c.iq.Size(); x++ {
+		connection := <-c.iq.poolOut
 		connection.Close()
-		c.connectionPool <- connection
+		c.iq.poolIn <- connection
 	}
 }
 
 func TestConcurrency(t *testing.T) {
 	client1, err := NewClient("localhost:45625", 100)
 	if err != nil {
-		t.Error("Unexpected new client error: ", err)
+		t.Fatal("Unexpected new client error: ", err)
 	}
 	var wg sync.WaitGroup
 	k := 'a'
@@ -106,20 +105,22 @@ func TestConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(ii int, key string) {
 			defer wg.Done()
-			fmt.Println("goroutine: ", ii, "getting lock", key)
-			id1, err := client1.Lock(key, 250*time.Millisecond)
-			if err != nil {
-				t.Error("goroutine: ", ii, "Unexpected lock error: ", err)
-			}
-			fmt.Println("goroutine: ", ii, "GOT LOCK", key)
-			time.Sleep(time.Duration(rand.Intn(60)) * time.Millisecond)
-			fmt.Println("goroutine: ", ii, "releasing lock", key)
-			err = client1.Unlock(key, id1)
-			if err != nil {
-				fmt.Println("goroutine: ", ii, key, "Already unlocked, it's ok: ", err)
-				//				t.Error("goroutine: ", ii, "Unexpected Unlock error: ", err)
-			} else {
-				fmt.Println("goroutine: ", ii, "released lock", key)
+			for j := 0; j < 50; j++ {
+				fmt.Println("goroutine: ", ii, "getting lock", key)
+				id1, err := client1.Lock(key, 1000*time.Millisecond)
+				if err != nil {
+					t.Error("goroutine: ", ii, "Unexpected lock error: ", err)
+				}
+				fmt.Println("goroutine: ", ii, "GOT LOCK", key)
+				time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
+				fmt.Println("goroutine: ", ii, "releasing lock", key)
+				err = client1.Unlock(key, id1)
+				if err != nil {
+					fmt.Println("goroutine: ", ii, key, "Already unlocked, it's ok: ", err)
+					//				t.Error("goroutine: ", ii, "Unexpected Unlock error: ", err)
+				} else {
+					fmt.Println("goroutine: ", ii, "released lock", key)
+				}
 			}
 		}(i, string(k))
 	}
