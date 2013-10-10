@@ -58,24 +58,11 @@ func (c *Client) initPool(size int) error {
 }
 
 func (c *Client) getConnection() (*connection, error) {
-	select {
-	case conn := <-c.connectionPool:
-		return conn, nil
-	default:
-		conn, err := net.Dial("tcp", c.endpoint)
-		if err != nil {
-			return nil, err
-		}
-		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}, nil
-	}
+	return <-c.connectionPool, nil
 }
 
 func (c *Client) releaseConnection(connection *connection) {
-	select {
-	case c.connectionPool <- connection:
-	default:
-		connection.Close()
-	}
+	c.connectionPool <- connection
 }
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
