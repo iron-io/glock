@@ -155,7 +155,7 @@ func handleConn(conn net.Conn) {
 	}
 }
 
-func logMap(mapping map[string]interface{}) {
+func logMap(mapping map[string]*[2]int) {
 	for key, counter := range mapping {
 		log.Println("key: ", key, "counter: ", counter)
 	}
