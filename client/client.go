@@ -48,16 +48,18 @@ func NewClient(endpoint string, size int) (*Client, error) {
 func (c *Client) initPool(size int) error {
 	c.iq = NewSliceIQ()
 	go c.iq.Start()
+	/*
 	conn, err := net.Dial("tcp", c.endpoint)
 	if err != nil {
 		return err
 	}
 	c.iq.poolIn <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}
+*/
 	return nil
 }
 
 func (c *Client) getConnection() (*connection, error) {
-	select {
+	/*select {
 	case conn := <-c.iq.poolOut:
 		return conn, nil
 	default:
@@ -69,10 +71,18 @@ func (c *Client) getConnection() (*connection, error) {
 		conn2 := &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}
 		return conn2, nil
 	}
+*/
+   conn, err := net.Dial("tcp", c.endpoint)
+		if err != nil {
+			return nil, err
+		}
+		conn2 := &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}
+		return conn2, nil	
 }
 
 func (c *Client) releaseConnection(connection *connection) {
-	c.iq.poolIn <- connection
+	//c.iq.poolIn <- connection
+	connection.Close()
 }
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
