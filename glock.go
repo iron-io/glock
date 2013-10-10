@@ -21,14 +21,14 @@ type timeoutLock struct {
 var locksLock sync.RWMutex
 var locks = map[string]*timeoutLock{}
 var lockCountsLock sync.Mutex
-var lockCounts = map[string][2]int{}
+var lockCounts = map[string]*[2]int{}
 
 func main() {
-
 	c := time.Tick(10 * time.Second)
 	go func() {
+		log.Println(" --- Mapping summary --- ")
 		for _ = range c {
-			log.Println("lockCounts:", lockCounts)
+			logMap(lockCounts)
 		}
 	}()
 
@@ -47,6 +47,8 @@ func main() {
 		}
 		go handleConn(conn)
 	}
+
+	logMap(lockCounts)
 }
 
 var (
@@ -87,7 +89,9 @@ func handleConn(conn net.Conn) {
 				if !ok {
 					lock = &timeoutLock{}
 					locks[key] = lock
-					lockCounts[key] = [...]int{0, 0}
+					lockCountsLock.Lock()
+					lockCounts[key] = &[...]int{0, 0}
+					lockCountsLock.Unlock()
 				}
 				locksLock.Unlock()
 			}
@@ -148,5 +152,11 @@ func handleConn(conn net.Conn) {
 			conn.Write(errUnknownCommand)
 			continue
 		}
+	}
+}
+
+func logMap(mapping map[string]interface{}) {
+	for key, counter := range mapping {
+		log.Println("key: ", key, "counter: ", counter)
 	}
 }
