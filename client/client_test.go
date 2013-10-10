@@ -92,13 +92,13 @@ func (c *Client) testClose() {
 }
 
 func TestConcurrency(t *testing.T) {
-	client1, err := NewClient("localhost:45625", 100)
+	client1, err := NewClient("localhost:45625", 1000)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
 	var wg sync.WaitGroup
 	k := 'a'
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		fmt.Println("Value of i is now:", i)
 		if i > 0 && i%50 == 0 {
 			k += 1
@@ -121,6 +121,7 @@ func TestConcurrency(t *testing.T) {
 			} else {
 				fmt.Println("goroutine: ", ii, "released lock", key)
 			}
+			fmt.Println("pool size: ", client1.Size())
 		}(i, string(k))
 	}
 	fmt.Println("waiting for waitgroup...")

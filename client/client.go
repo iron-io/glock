@@ -34,6 +34,10 @@ func (c *Client) ClosePool() error {
 	return nil
 }
 
+func (c *Client) Size() int {
+	return len(c.connectionPool)
+}
+
 func NewClient(endpoint string, size int) (*Client, error) {
 	client := &Client{endpoint: endpoint}
 	err := client.initPool(size)
