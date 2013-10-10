@@ -92,13 +92,13 @@ func (c *Client) testClose() {
 }
 
 func TestConcurrency(t *testing.T) {
-	client1, err := NewClient("localhost:45625", 1000)
+	client1, err := NewClient("localhost:45625", 200)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
 	var wg sync.WaitGroup
 	k := 'a'
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		fmt.Println("Value of i is now:", i)
 		if i > 0 && i%50 == 0 {
 			k += 1
@@ -106,22 +106,24 @@ func TestConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(ii int, key string) {
 			defer wg.Done()
-			fmt.Println("goroutine: ", ii, "getting lock", key)
-			id1, err := client1.Lock(key, 250*time.Millisecond)
-			if err != nil {
-				t.Error("goroutine: ", ii, "Unexpected lock error: ", err)
+			for j := 0; j < 20; j++ {
+				fmt.Println("goroutine: ", ii, "getting lock", key)
+				id1, err := client1.Lock(key, 250*time.Millisecond)
+				if err != nil {
+					t.Error("goroutine: ", ii, "Unexpected lock error: ", err)
+				}
+				fmt.Println("goroutine: ", ii, "GOT LOCK", key)
+				time.Sleep(time.Duration(rand.Intn(60)) * time.Millisecond)
+				fmt.Println("goroutine: ", ii, "releasing lock", key)
+				err = client1.Unlock(key, id1)
+				if err != nil {
+					fmt.Println("goroutine: ", ii, key, "Already unlocked, it's ok: ", err)
+					//				t.Error("goroutine: ", ii, "Unexpected Unlock error: ", err)
+				} else {
+					fmt.Println("goroutine: ", ii, "released lock", key)
+				}
+				fmt.Println("pool size: ", client1.Size())
 			}
-			fmt.Println("goroutine: ", ii, "GOT LOCK", key)
-			time.Sleep(time.Duration(rand.Intn(60)) * time.Millisecond)
-			fmt.Println("goroutine: ", ii, "releasing lock", key)
-			err = client1.Unlock(key, id1)
-			if err != nil {
-				fmt.Println("goroutine: ", ii, key, "Already unlocked, it's ok: ", err)
-				//				t.Error("goroutine: ", ii, "Unexpected Unlock error: ", err)
-			} else {
-				fmt.Println("goroutine: ", ii, "released lock", key)
-			}
-			fmt.Println("pool size: ", client1.Size())
 		}(i, string(k))
 	}
 	fmt.Println("waiting for waitgroup...")

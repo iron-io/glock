@@ -20,8 +20,18 @@ type timeoutLock struct {
 
 var locksLock sync.RWMutex
 var locks = map[string]*timeoutLock{}
+var lockCountsLock sync.Mutex
+var lockCounts = map[string][2]int{}
 
 func main() {
+
+	c := time.Tick(10 * time.Second)
+	go func() {
+		for _ = range c {
+			log.Println("lockCounts:", lockCounts)
+		}
+	}()
+
 	var port int
 	flag.IntVar(&port, "p", 45625, "port")
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(port))
@@ -77,14 +87,20 @@ func handleConn(conn net.Conn) {
 				if !ok {
 					lock = &timeoutLock{}
 					locks[key] = lock
+					lockCounts[key] = [...]int{0, 0}
 				}
 				locksLock.Unlock()
 			}
-
+			lockCountsLock.Lock()
+			lockCounts[key][0] += 1
+			lockCountsLock.Unlock()
 			lock.mutex.Lock()
 			id := atomic.AddInt64(&lock.id, 1)
 			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
 				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+					lockCountsLock.Lock()
+					lockCounts[key][1] += 1
+					lockCountsLock.Unlock()
 					lock.mutex.Unlock()
 					log.Printf("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
 				}
@@ -113,6 +129,9 @@ func handleConn(conn net.Conn) {
 				continue
 			}
 			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+				lockCountsLock.Lock()
+				lockCounts[key][1] += 1
+				lockCountsLock.Unlock()
 				lock.mutex.Unlock()
 				conn.Write(unlockedResponse)
 
