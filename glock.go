@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"log/syslog"
 	"net"
 	"strconv"
 	"strings"
@@ -19,39 +18,7 @@ import (
 )
 
 type Config struct {
-	Logging struct {
-		To     string `json:"to"`
-		Level  string `json:"level"`
-		Prefix string `json:"prefix"`
-	}
-}
-
-func SetLogLevel(level string) {
-	switch level {
-	case "debug":
-		golog.DefaultLogger.Level = golog.Debug
-	case "warn":
-		golog.DefaultLogger.Level = golog.Warn
-	case "error":
-		golog.DefaultLogger.Level = golog.Error
-	default:
-		golog.DefaultLogger.Level = golog.Info
-	}
-}
-
-func SetLogLocation(to, prefix string) {
-	switch to {
-	case "":
-	case "papertrail":
-		to = "logs.papertrailapp.com:22034"
-		fallthrough
-	default:
-		writer, err := syslog.Dial("udp", to, syslog.LOG_INFO, prefix)
-		if err != nil {
-			log.Fatalln("unable to connect to Papertrail:", err)
-		}
-		log.SetOutput(writer)
-	}
+	Logging golog.LoggingConfig
 }
 
 type timeoutLock struct {
@@ -73,8 +40,8 @@ func main() {
 
 	var config Config
 	LoadConfig("ironmq", "config.json", &config)
-	SetLogLevel(config.Logging.Level)
-	SetLogLocation(config.Logging.To, config.Logging.Prefix)
+	golog.SetLogLevel(config.Logging.Level)
+	golog.SetLogLocation(config.Logging.To, config.Logging.Prefix)
 
 	for {
 		conn, err := listener.Accept()
