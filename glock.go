@@ -14,46 +14,51 @@ import (
 )
 
 type timeoutLock struct {
-	mutex sync.Mutex
-	id    int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
+	sync.Mutex
+	id int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
 }
 
-var locksLock sync.RWMutex
-var locks = map[string]*timeoutLock{}
+var locks = struct {
+	sync.RWMutex
+	m map[string]*timeoutLock
+}{
+	m: make(map[string]*timeoutLock),
+}
+
+var (
+	laddr = flag.String("l", ":45625", "the address to bind to")
+)
 
 func main() {
-	var port int
-	flag.IntVar(&port, "p", 45625, "port")
-	listener, err := net.Listen("tcp", ":"+strconv.Itoa(port))
+	flag.Parse()
+
+	l, err := net.Listen("tcp", *laddr)
 	if err != nil {
 		log.Fatalln("error listening", err)
 	}
 
 	for {
-		conn, err := listener.Accept()
+		c, err := l.Accept()
 		if err != nil {
-			log.Println("error accepting", err)
-			return
+			log.Fatal("error accepting", err)
 		}
-		go handleConn(conn)
+		go serve(c)
 	}
 }
 
 var (
-	unlockedResponse    = []byte("UNLOCKED\n")
-	notUnlockedResponse = []byte("NOT_UNLOCKED\n")
-
-	errBadFormat      = []byte("ERROR bad command format\n")
-	errUnknownCommand = []byte("ERROR unknown command\n")
-	errLockNotFound   = []byte("ERROR lock not found\n")
+	respUnlocked       = []byte("UNLOCKED\n")
+	respBadFormat      = []byte("ERROR bad command format\n")
+	respUnknownCommand = []byte("ERROR unknown command\n")
+	respLockNotFound   = []byte("ERROR lock not found\n")
 )
 
-func handleConn(conn net.Conn) {
-	scanner := bufio.NewScanner(conn)
+func serve(c net.Conn) {
+	scanner := bufio.NewScanner(c)
 	for scanner.Scan() {
 		split := strings.Fields(scanner.Text())
 		if len(split) < 3 {
-			conn.Write(errBadFormat)
+			c.Write(respBadFormat)
 			continue
 		}
 		cmd := split[0]
@@ -62,34 +67,34 @@ func handleConn(conn net.Conn) {
 		// LOCK <key> <timeout>
 		case "LOCK":
 			timeout, err := strconv.Atoi(split[2])
-
 			if err != nil {
-				conn.Write(errBadFormat)
+				c.Write(respBadFormat)
 				continue
 			}
-			locksLock.RLock()
-			lock, ok := locks[key]
-			locksLock.RUnlock()
+
+			locks.RLock()
+			lk, ok := locks.m[key]
+			locks.RUnlock()
 			if !ok {
 				// lock doesn't exist; create it
-				locksLock.Lock()
-				lock, ok = locks[key]
+				locks.Lock()
+				lk, ok = locks.m[key]
 				if !ok {
-					lock = &timeoutLock{}
-					locks[key] = lock
+					lk = &timeoutLock{}
+					locks.m[key] = lk
 				}
-				locksLock.Unlock()
+				locks.Unlock()
 			}
 
-			lock.mutex.Lock()
-			id := atomic.AddInt64(&lock.id, 1)
+			lk.Lock()
+			id := atomic.AddInt64(&lk.id, 1)
 			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
-				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-					lock.mutex.Unlock()
+				if atomic.CompareAndSwapInt64(&lk.id, id, id+1) {
+					lk.Unlock()
 					log.Printf("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
 				}
 			})
-			fmt.Fprintf(conn, "LOCKED %v\n", id)
+			fmt.Fprintf(c, "LOCKED %v\n", id)
 
 			log.Printf("Request:  %-12s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
 			log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "LOCKED", key, id)
@@ -97,36 +102,31 @@ func handleConn(conn net.Conn) {
 		// UNLOCK <key> <id>
 		case "UNLOCK":
 			id, err := strconv.ParseInt(split[2], 10, 64)
-
 			if err != nil {
-				conn.Write(errBadFormat)
+				c.Write(respBadFormat)
 				continue
 			}
-			locksLock.RLock()
-			lock, ok := locks[key]
-			locksLock.RUnlock()
+
+			locks.RLock()
+			lk, ok := locks.m[key]
+			locks.RUnlock()
 			if !ok {
-				conn.Write(errLockNotFound)
+				c.Write(respLockNotFound)
 
 				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
 				log.Printf("Response: %-12s | Key:  %-15s", "404", key)
 				continue
 			}
-			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-				lock.mutex.Unlock()
-				conn.Write(unlockedResponse)
-
-				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
-			} else {
-				conn.Write(notUnlockedResponse)
-
-				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "NOT_UNLOCKED", key, id)
+			if atomic.CompareAndSwapInt64(&lk.id, id, id+1) {
+				lk.Unlock()
 			}
+			c.Write(respUnlocked)
+
+			log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+			log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
 
 		default:
-			conn.Write(errUnknownCommand)
+			c.Write(respUnknownCommand)
 			continue
 		}
 	}
