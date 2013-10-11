@@ -47,12 +47,10 @@ func main() {
 }
 
 var (
-	unlockedResponse    = []byte("UNLOCKED\n")
-	notUnlockedResponse = []byte("NOT_UNLOCKED\n")
-
-	errBadFormat      = []byte("ERROR bad command format\n")
-	errUnknownCommand = []byte("ERROR unknown command\n")
-	errLockNotFound   = []byte("ERROR lock not found\n")
+	respUnlocked       = []byte("UNLOCKED\n")
+	respBadFormat      = []byte("ERROR bad command format\n")
+	respUnknownCommand = []byte("ERROR unknown command\n")
+	respLockNotFound   = []byte("ERROR lock not found\n")
 )
 
 func serve(c net.Conn) {
@@ -60,7 +58,7 @@ func serve(c net.Conn) {
 	for scanner.Scan() {
 		split := strings.Fields(scanner.Text())
 		if len(split) < 3 {
-			c.Write(errBadFormat)
+			c.Write(respBadFormat)
 			continue
 		}
 		cmd := split[0]
@@ -70,7 +68,7 @@ func serve(c net.Conn) {
 		case "LOCK":
 			timeout, err := strconv.Atoi(split[2])
 			if err != nil {
-				c.Write(errBadFormat)
+				c.Write(respBadFormat)
 				continue
 			}
 
@@ -105,7 +103,7 @@ func serve(c net.Conn) {
 		case "UNLOCK":
 			id, err := strconv.ParseInt(split[2], 10, 64)
 			if err != nil {
-				c.Write(errBadFormat)
+				c.Write(respBadFormat)
 				continue
 			}
 
@@ -113,7 +111,7 @@ func serve(c net.Conn) {
 			lk, ok := locks.m[key]
 			locks.RUnlock()
 			if !ok {
-				c.Write(errLockNotFound)
+				c.Write(respLockNotFound)
 
 				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
 				log.Printf("Response: %-12s | Key:  %-15s", "404", key)
@@ -122,13 +120,13 @@ func serve(c net.Conn) {
 			if atomic.CompareAndSwapInt64(&lk.id, id, id+1) {
 				lk.Unlock()
 			}
-			c.Write(unlockedResponse)
+			c.Write(respUnlocked)
 
 			log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
 			log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
 
 		default:
-			c.Write(errUnknownCommand)
+			c.Write(respUnknownCommand)
 			continue
 		}
 	}
