@@ -15,10 +15,10 @@ import (
 
 type timeoutLock struct {
 	sync.Mutex
-	id    int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
+	id int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
 }
 
-var locks = struct{
+var locks = struct {
 	sync.RWMutex
 	m map[string]*timeoutLock
 }{
