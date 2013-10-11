@@ -43,7 +43,7 @@ func main() {
 			log.Println("error accepting", err)
 			return
 		}
-		go handleConn(c)
+		go serve(c)
 	}
 }
 
@@ -56,7 +56,7 @@ var (
 	errLockNotFound   = []byte("ERROR lock not found\n")
 )
 
-func handleConn(c net.Conn) {
+func serve(c net.Conn) {
 	scanner := bufio.NewScanner(c)
 	for scanner.Scan() {
 		split := strings.Fields(scanner.Text())
