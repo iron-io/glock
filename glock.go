@@ -18,8 +18,12 @@ type timeoutLock struct {
 	id    int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
 }
 
-var locksLock sync.RWMutex
-var locks = map[string]*timeoutLock{}
+var locks = struct{
+	sync.RWMutex
+	m map[string]*timeoutLock
+}{
+	m: make(map[string]*timeoutLock),
+}
 
 func main() {
 	var port int
@@ -67,18 +71,18 @@ func handleConn(conn net.Conn) {
 				conn.Write(errBadFormat)
 				continue
 			}
-			locksLock.RLock()
-			lock, ok := locks[key]
-			locksLock.RUnlock()
+			locks.RLock()
+			lock, ok := locks.m[key]
+			locks.RUnlock()
 			if !ok {
 				// lock doesn't exist; create it
-				locksLock.Lock()
-				lock, ok = locks[key]
+				locks.Lock()
+				lock, ok = locks.m[key]
 				if !ok {
 					lock = &timeoutLock{}
-					locks[key] = lock
+					locks.m[key] = lock
 				}
-				locksLock.Unlock()
+				locks.Unlock()
 			}
 
 			lock.mutex.Lock()
@@ -102,9 +106,9 @@ func handleConn(conn net.Conn) {
 				conn.Write(errBadFormat)
 				continue
 			}
-			locksLock.RLock()
-			lock, ok := locks[key]
-			locksLock.RUnlock()
+			locks.RLock()
+			lock, ok := locks.m[key]
+			locks.RUnlock()
 			if !ok {
 				conn.Write(errLockNotFound)
 
