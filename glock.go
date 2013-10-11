@@ -25,10 +25,14 @@ var locks = struct {
 	m: make(map[string]*timeoutLock),
 }
 
+var (
+	laddr = flag.String("l", ":45625", "the address to bind to")
+)
+
 func main() {
-	var port int
-	flag.IntVar(&port, "p", 45625, "port")
-	l, err := net.Listen("tcp", ":"+strconv.Itoa(port))
+	flag.Parse()
+
+	l, err := net.Listen("tcp", *laddr)
 	if err != nil {
 		log.Fatalln("error listening", err)
 	}
