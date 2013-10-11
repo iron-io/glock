@@ -14,7 +14,7 @@ import (
 )
 
 type timeoutLock struct {
-	mutex sync.Mutex
+	sync.Mutex
 	id    int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
 }
 
@@ -85,11 +85,11 @@ func handleConn(conn net.Conn) {
 				locks.Unlock()
 			}
 
-			lock.mutex.Lock()
+			lock.Lock()
 			id := atomic.AddInt64(&lock.id, 1)
 			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
 				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-					lock.mutex.Unlock()
+					lock.Unlock()
 					log.Printf("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
 				}
 			})
@@ -117,7 +117,7 @@ func handleConn(conn net.Conn) {
 				continue
 			}
 			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-				lock.mutex.Unlock()
+				lock.Unlock()
 				conn.Write(unlockedResponse)
 
 				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
