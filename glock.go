@@ -70,11 +70,11 @@ func serve(c net.Conn) {
 		// LOCK <key> <timeout>
 		case "LOCK":
 			timeout, err := strconv.Atoi(split[2])
-
 			if err != nil {
 				c.Write(errBadFormat)
 				continue
 			}
+
 			locks.RLock()
 			lk, ok := locks.m[key]
 			locks.RUnlock()
@@ -105,11 +105,11 @@ func serve(c net.Conn) {
 		// UNLOCK <key> <id>
 		case "UNLOCK":
 			id, err := strconv.ParseInt(split[2], 10, 64)
-
 			if err != nil {
 				c.Write(errBadFormat)
 				continue
 			}
+
 			locks.RLock()
 			lk, ok := locks.m[key]
 			locks.RUnlock()
