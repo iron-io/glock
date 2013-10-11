@@ -40,8 +40,7 @@ func main() {
 	for {
 		c, err := l.Accept()
 		if err != nil {
-			log.Println("error accepting", err)
-			return
+			log.Fatal("error accepting", err)
 		}
 		go serve(c)
 	}
