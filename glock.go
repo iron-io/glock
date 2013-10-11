@@ -118,16 +118,11 @@ func handleConn(conn net.Conn) {
 			}
 			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 				lock.Unlock()
-				conn.Write(unlockedResponse)
-
-				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
-			} else {
-				conn.Write(notUnlockedResponse)
-
-				log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "NOT_UNLOCKED", key, id)
 			}
+			conn.Write(unlockedResponse)
+
+			log.Printf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+			log.Printf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
 
 		default:
 			conn.Write(errUnknownCommand)
