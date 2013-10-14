@@ -11,6 +11,20 @@ import (
 	"time"
 )
 
+type glockError struct {
+	errType string
+	Err     error
+}
+
+func (e *glockError) Error() string {
+	return e.Err.Error()
+}
+
+var (
+	connectionErr string = "Connection Error"
+	internalErr   string = "Internal Error"
+)
+
 type Client struct {
 	endpoint       string
 	connectionPool chan *connection
@@ -127,7 +141,7 @@ func (c *connection) fprintf(format string, a ...interface{}) error {
 		if err != nil {
 			err = c.redial()
 			if err != nil {
-				return err
+				return &glockError{errType: connectionErr, Err: err}
 			}
 		} else {
 			return nil
@@ -140,13 +154,13 @@ func (c *connection) readResponse() (splits []string, err error) {
 	response, err := c.reader.ReadString('\n')
 	log.Println("glockResponse: ", response)
 	if err != nil {
-		return nil, err
+		return nil, &glockError{errType: connectionErr, Err: err}
 	}
 
 	trimmedResponse := strings.TrimRight(response, "\n")
 	splits = strings.Split(trimmedResponse, " ")
 	if splits[0] == "ERROR" {
-		return nil, errors.New(trimmedResponse)
+		return nil, &glockError{errType: internalErr, Err: trimmedResponse}
 	}
 
 	return splits, nil
