@@ -28,6 +28,7 @@ var (
 )
 
 type Client struct {
+	endpoints       []string
 	consistent      *consistent.Consistent
 	connectionPools map[string]chan *connection
 }
@@ -59,7 +60,8 @@ func (c *Client) Size() int {
 }
 
 func NewClient(endpoints []string, size int) (*Client, error) {
-	client := &Client{consistent: initServersPool(endpoints), connectionPools: make(map[string]chan *connection)}
+	client := &Client{consistent: initServersPool(endpoints), connectionPools: make(map[string]chan *connection), endpoints: endpoints}
+	client.CheckServerStatus()
 	err := client.initPool(size)
 	if err != nil {
 		return nil, err
