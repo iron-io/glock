@@ -174,6 +174,8 @@ func TestServerDrop(t *testing.T) {
 		fmt.Println("pool size: ", client1.Size())
 
 	}
+	time.Sleep(1 * time.Second)
+	fmt.Println("pool size: ", client1.Size())
 }
 
 // A little hack to simulate server dropped out
