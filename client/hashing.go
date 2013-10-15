@@ -18,6 +18,7 @@ func addEndpoints(cons *consistent.Consistent, endpoints []string) {
 	for _, endpoint := range endpoints {
 		conn, err := net.Dial("tcp", endpoint)
 		if err == nil {
+			log.Println("Adding Endpoint to glock servers: ", endpoint)
 			cons.Add(endpoint)
 			conn.Close()
 		}
@@ -25,7 +26,7 @@ func addEndpoints(cons *consistent.Consistent, endpoints []string) {
 }
 
 func (c *Client) CheckServerStatus() {
-	ticker := time.Tick(5 * time.Second)
+	ticker := time.Tick(1 * time.Second)
 	go func() {
 		for _ = range ticker {
 			down := downServers(c.endpoints, c.consistent.Members())
@@ -33,9 +34,8 @@ func (c *Client) CheckServerStatus() {
 				addEndpoints(c.consistent, down)
 			}
 
-			log.Println("Connection Pool Size: ")
-			for server, pool := range c.connectionPools {
-				log.Println("Glock Server - ", server, ": ", len(pool))
+			for _, server := range c.consistent.Members() {
+				log.Println("Glock Server - ", server, ": ", len(c.connectionPools[server]))
 			}
 		}
 	}()
