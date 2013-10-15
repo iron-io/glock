@@ -9,11 +9,27 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/stathat/consistent"
+)
+
+type glockError struct {
+	errType string
+	Err     error
+}
+
+func (e *glockError) Error() string {
+	return e.Err.Error()
+}
+
+var (
+	connectionErr string = "Connection Error"
+	internalErr   string = "Internal Error"
 )
 
 type Client struct {
-	endpoint       string
-	connectionPool chan *connection
+	consistent      *consistent.Consistent
+	connectionPools map[string]chan *connection
 }
 
 type connection struct {
@@ -22,24 +38,28 @@ type connection struct {
 	reader   *bufio.Reader
 }
 
-func (c *Client) ClosePool() error {
-	size := len(c.connectionPool)
-	for x := 0; x < size; x++ {
-		connection := <-c.connectionPool
-		err := connection.Close()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// func (c *Client) ClosePool() error {
+// 	size := len(c.connectionPool)
+// 	for x := 0; x < size; x++ {
+// 		connection := <-c.connectionPool
+// 		err := connection.Close()
+// 		if err != nil {
+// 			return err
+// 		}
+// 	}
+// 	return nil
+// }
 
 func (c *Client) Size() int {
-	return len(c.connectionPool)
+	var size int
+	for _, pool := range c.connectionPools {
+		size += len(pool)
+	}
+	return size
 }
 
-func NewClient(endpoint string, size int) (*Client, error) {
-	client := &Client{endpoint: endpoint}
+func NewClient(endpoints []string, size int) (*Client, error) {
+	client := &Client{consistent: initServersPool(endpoints), connectionPools: make(map[string]chan *connection)}
 	err := client.initPool(size)
 	if err != nil {
 		return nil, err
@@ -50,56 +70,86 @@ func NewClient(endpoint string, size int) (*Client, error) {
 }
 
 func (c *Client) initPool(size int) error {
-	c.connectionPool = make(chan *connection, size)
-	for x := 0; x < size; x++ {
-		conn, err := net.Dial("tcp", c.endpoint)
-		if err != nil {
-			return err
+	for _, endpoint := range c.consistent.Members() {
+		c.connectionPools[endpoint] = make(chan *connection, size)
+		for x := 0; x < size; x++ {
+			conn, err := net.Dial("tcp", endpoint)
+			if err != nil {
+				c.consistent.Remove(endpoint)
+				break
+			}
+			c.connectionPools[endpoint] <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint}
 		}
-		c.connectionPool <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: c.endpoint}
 	}
 	return nil
 }
 
-func (c *Client) getConnection() (*connection, error) {
-	return <-c.connectionPool, nil
+func (c *Client) getConnection(server, key string) (*connection, error) {
+	return <-c.connectionPools[server], nil
 }
 
-func (c *Client) releaseConnection(connection *connection) {
-	c.connectionPool <- connection
+func (c *Client) releaseConnection(server, key string, connection *connection) {
+	c.connectionPools[server] <- connection
 }
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
-	connection, err := c.getConnection()
-	if err != nil {
-		return id, err
-	}
-	defer c.releaseConnection(connection)
-
-	err = connection.fprintf("LOCK %s %d\n", key, int(duration/time.Millisecond))
+	// its important that we get the server before we do getConnection (instead of inside getConnection) because if that error drops we need to put the connection back to the original mapping.
+	server, err := c.consistent.Get(key)
 	if err != nil {
 		return id, err
 	}
 
-	splits, err := connection.readResponse()
+	connection, err := c.getConnection(server, key)
+	if err != nil {
+		return id, err
+	}
+	defer c.releaseConnection(server, key, connection)
+
+	id, err = connection.lock(key, duration)
+	if err != nil {
+		if err, ok := err.(*glockError); ok {
+			if err.errType == connectionErr {
+				c.consistent.Remove(connection.endpoint)
+				// todo for evan/treeder, if it is a connection error remove the failed server and then lock again recursively
+				return c.Lock(key, duration)
+			} else {
+				return id, err
+			}
+		}
+	}
+	return id, nil
+}
+
+func (c *connection) lock(key string, duration time.Duration) (id int64, err error) {
+	err = c.fprintf("LOCK %s %d\n", key, int(duration/time.Millisecond))
+	if err != nil {
+		return id, err
+	}
+
+	splits, err := c.readResponse()
 	if err != nil {
 		return id, err
 	}
 
 	id, err = strconv.ParseInt(splits[1], 10, 64)
 	if err != nil {
-		return id, err
+		return id, &glockError{errType: internalErr, Err: err}
 	}
 
 	return id, nil
 }
 
 func (c *Client) Unlock(key string, id int64) (err error) {
-	connection, err := c.getConnection()
+	server, err := c.consistent.Get(key)
 	if err != nil {
 		return err
 	}
-	defer c.releaseConnection(connection)
+
+	connection, err := c.getConnection(server, key)
+	if err != nil {
+		return err
+	}
+	defer c.releaseConnection(server, key, connection)
 
 	err = connection.fprintf("UNLOCK %s %d\n", key, id)
 	if err != nil {
@@ -127,10 +177,10 @@ func (c *connection) fprintf(format string, a ...interface{}) error {
 		if err != nil {
 			err = c.redial()
 			if err != nil {
-				return err
+				return &glockError{errType: connectionErr, Err: err}
 			}
 		} else {
-			return nil
+			break
 		}
 	}
 	return nil
@@ -140,13 +190,13 @@ func (c *connection) readResponse() (splits []string, err error) {
 	response, err := c.reader.ReadString('\n')
 	log.Println("glockResponse: ", response)
 	if err != nil {
-		return nil, err
+		return nil, &glockError{errType: connectionErr, Err: err}
 	}
 
 	trimmedResponse := strings.TrimRight(response, "\n")
 	splits = strings.Split(trimmedResponse, " ")
 	if splits[0] == "ERROR" {
-		return nil, errors.New(trimmedResponse)
+		return nil, &glockError{errType: internalErr, Err: errors.New(trimmedResponse)}
 	}
 
 	return splits, nil
