@@ -74,7 +74,9 @@ func NewClient(endpoints []string, size int) (*Client, error) {
 func (c *Client) initPool(size int) error {
 	for _, endpoint := range c.consistent.Members() {
 		c.connectionPools[endpoint] = make(chan *connection, size)
-		for x := 0; x < size; x++ {
+
+		// Init with 1 for now
+		for x := 0; x < 1; x++ {
 			conn, err := net.Dial("tcp", endpoint)
 			if err != nil {
 				c.consistent.Remove(endpoint)
@@ -87,11 +89,24 @@ func (c *Client) initPool(size int) error {
 }
 
 func (c *Client) getConnection(server, key string) (*connection, error) {
-	return <-c.connectionPools[server], nil
+	select {
+	case conn := <-c.connectionPools[server]:
+		return conn, nil
+	default:
+		conn, err := net.Dial("tcp", server)
+		if err != nil {
+			return nil, err
+		}
+		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: server}, nil
+	}
 }
 
 func (c *Client) releaseConnection(server, key string, connection *connection) {
-	c.connectionPools[server] <- connection
+	select {
+	case c.connectionPools[server] <- connection:
+	default:
+		connection.Close()
+	}
 }
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
