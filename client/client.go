@@ -72,7 +72,7 @@ func NewClient(endpoints []string, size int) (*Client, error) {
 }
 
 func (c *Client) initPool(size int) error {
-	for _, endpoint := range c.consistent.Members() {
+	for _, endpoint := range c.endpoints {
 		c.connectionPools[endpoint] = make(chan *connection, size)
 
 		// Init with 1 for now
