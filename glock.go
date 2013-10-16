@@ -17,6 +17,12 @@ import (
 	"github.com/iron-io/golog"
 )
 
+type LoggingConfig struct {
+	To     string `json:"to"`
+	Level  string `json:"level"`
+	Prefix string `json:"prefix"`
+}
+
 type timeoutLock struct {
 	mutex sync.Mutex
 	id    int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
@@ -37,7 +43,7 @@ func main() {
 		log.Fatalln("error listening", err)
 	}
 
-	var config golog.LoggingConfig
+	var config LoggingConfig
 	if configFile != "" {
 		LoadConfig(configFile, &config)
 	}
