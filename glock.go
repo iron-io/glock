@@ -17,6 +17,11 @@ import (
 	"github.com/iron-io/golog"
 )
 
+type GlockConfig struct {
+	Port    int `json:"port"`
+	Logging LoggingConfig
+}
+
 type LoggingConfig struct {
 	To     string `json:"to"`
 	Level  string `json:"level"`
@@ -38,18 +43,22 @@ func main() {
 	flag.StringVar(&configFile, "config", "", "Name of the the file that contains config information")
 	flag.Parse()
 
+	var config GlockConfig
+	if configFile != "" {
+		LoadConfig(configFile, &config)
+	}
+
+	if config.Port != 0 {
+		port = config.Port
+	}
+
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
 		log.Fatalln("error listening", err)
 	}
 
-	var config LoggingConfig
-	if configFile != "" {
-		LoadConfig(configFile, &config)
-	}
-
-	golog.SetLogLevel(config.Level)
-	golog.SetLogLocation(config.To, config.Prefix)
+	golog.SetLogLevel(config.Logging.Level)
+	golog.SetLogLocation(config.Logging.To, config.Logging.Prefix)
 	golog.Infoln("Glock Server available at port ", port)
 
 	for {
