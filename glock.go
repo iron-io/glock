@@ -31,17 +31,24 @@ var locks = map[string]*timeoutLock{}
 
 func main() {
 	var port int
+	var configFile string
 	flag.IntVar(&port, "p", 45625, "port")
+	flag.StringVar(&configFile, "config", "", "Name of the the file that contains config information")
 	flag.Parse()
+
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
 		log.Fatalln("error listening", err)
 	}
 
 	var config Config
-	LoadConfig("ironmq", "config.json", &config)
+	if configFile != "" {
+		LoadConfig(configFile, &config)
+	}
+
 	golog.SetLogLevel(config.Logging.Level)
 	golog.SetLogLocation(config.Logging.To, config.Logging.Prefix)
+	golog.Infoln("Glock Server available at port ", port)
 
 	for {
 		conn, err := listener.Accept()
@@ -100,13 +107,13 @@ func handleConn(conn net.Conn) {
 			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
 				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 					lock.mutex.Unlock()
-					golog.Infof("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
+					golog.Debugf("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
 				}
 			})
 			fmt.Fprintf(conn, "LOCKED %v\n", id)
 
-			golog.Infof("Request:  %-12s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
-			golog.Infof("Response: %-12s | Key:  %-15s | Id: %d", "LOCKED", key, id)
+			golog.Debugf("Request:  %-12s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
+			golog.Debugf("Response: %-12s | Key:  %-15s | Id: %d", "LOCKED", key, id)
 
 		// UNLOCK <key> <id>
 		case "UNLOCK":
@@ -122,21 +129,21 @@ func handleConn(conn net.Conn) {
 			if !ok {
 				conn.Write(errLockNotFound)
 
-				golog.Infof("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				golog.Infof("Response: %-12s | Key:  %-15s", "404", key)
+				golog.Debugf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+				golog.Debugf("Response: %-12s | Key:  %-15s", "404", key)
 				continue
 			}
 			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 				lock.mutex.Unlock()
 				conn.Write(unlockedResponse)
 
-				golog.Infof("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				golog.Infof("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
+				golog.Debugf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+				golog.Debugf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
 			} else {
 				conn.Write(notUnlockedResponse)
 
-				golog.Infof("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				golog.Infof("Response: %-12s | Key:  %-15s | Id: %d", "NOT_UNLOCKED", key, id)
+				golog.Debugf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
+				golog.Debugf("Response: %-12s | Key:  %-15s | Id: %d", "NOT_UNLOCKED", key, id)
 			}
 
 		default:
@@ -146,7 +153,7 @@ func handleConn(conn net.Conn) {
 	}
 }
 
-func LoadConfig(dir, configFile string, config interface{}) {
+func LoadConfig(configFile string, config interface{}) {
 	config_s, err := ioutil.ReadFile(configFile)
 	if err != nil {
 		log.Fatalln("Couldn't find config at:", configFile)
