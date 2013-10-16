@@ -17,10 +17,6 @@ import (
 	"github.com/iron-io/golog"
 )
 
-type Config struct {
-	Logging golog.LoggingConfig
-}
-
 type timeoutLock struct {
 	mutex sync.Mutex
 	id    int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
@@ -41,13 +37,13 @@ func main() {
 		log.Fatalln("error listening", err)
 	}
 
-	var config Config
+	var config golog.LoggingConfig
 	if configFile != "" {
 		LoadConfig(configFile, &config)
 	}
 
-	golog.SetLogLevel(config.Logging.Level)
-	golog.SetLogLocation(config.Logging.To, config.Logging.Prefix)
+	golog.SetLogLevel(config.Level)
+	golog.SetLogLocation(config.To, config.Prefix)
 	golog.Infoln("Glock Server available at port ", port)
 
 	for {
