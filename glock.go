@@ -32,6 +32,7 @@ var locks = map[string]*timeoutLock{}
 func main() {
 	var port int
 	flag.IntVar(&port, "p", 45625, "port")
+	flag.Parse()
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
 		log.Fatalln("error listening", err)
