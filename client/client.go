@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iron-io/golog"
@@ -31,6 +32,7 @@ var (
 type Client struct {
 	endpoints       []string
 	consistent      *consistent.Consistent
+	poolsLock       sync.RWMutex
 	connectionPools map[string]chan *connection
 	poolSize        int
 }
@@ -118,9 +120,15 @@ func (c *Client) getConnection(key string) (*connection, error) {
 }
 
 func (c *Client) releaseConnection(connection *connection) {
-	// todo: sometimes this pool could be nil, should maybe check that first
+	connectionPool := c.connectionPools[connection.endpoint]
+
+	if connectionPool == nil {
+		connection.Close()
+		return
+	}
+
 	select {
-	case c.connectionPools[connection.endpoint] <- connection:
+	case connectionPool <- connection:
 	default:
 		connection.Close()
 	}
@@ -179,7 +187,17 @@ func (c *connection) lock(key string, duration time.Duration) (id int64, err err
 func (c *Client) removeEndpoint(endpoint string) {
 	// remove from hash first
 	c.consistent.Remove(endpoint)
-	// then we should get rid of all the connections, might be a race somewhere with this.
+	// then we should get rid of all the connections
+
+	c.poolsLock.RLock()
+	_, ok := c.connectionPools[endpoint]
+	c.poolsLock.RUnlock()
+	if !ok {
+		return
+	}
+
+	c.poolsLock.Lock()
+	defer c.poolsLock.Unlock()
 	c.connectionPools[endpoint] = nil
 }
 
