@@ -120,9 +120,9 @@ func (c *Client) getConnection(key string) (*connection, error) {
 }
 
 func (c *Client) releaseConnection(connection *connection) {
-	connectionPool := c.connectionPools[connection.endpoint]
+	connectionPool, ok := c.connectionPools[connection.endpoint]
 
-	if connectionPool == nil {
+	if !ok {
 		connection.Close()
 		return
 	}
