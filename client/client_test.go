@@ -114,7 +114,7 @@ func TestConcurrency(t *testing.T) {
 		go func(ii int, key string) {
 			defer wg.Done()
 			fmt.Println("goroutine: ", ii, "getting lock", key)
-			id1, err := client1.Lock(key, 250*time.Millisecond)
+			id1, err := client1.Lock(key, 1000*time.Millisecond)
 			if err != nil {
 				t.Error("goroutine: ", ii, "Unexpected lock error: ", err)
 			}
@@ -124,7 +124,7 @@ func TestConcurrency(t *testing.T) {
 			err = client1.Unlock(key, id1)
 			if err != nil {
 				fmt.Println("goroutine: ", ii, key, "Already unlocked, it's ok: ", err)
-				//				t.Error("goroutine: ", ii, "Unexpected Unlock error: ", err)
+				t.Error("goroutine: ", ii, "Unexpected Unlock error: ", err)
 			} else {
 				fmt.Println("goroutine: ", ii, "released lock", key)
 			}
@@ -151,7 +151,7 @@ func TestServerDrop(t *testing.T) {
 		}
 		key := string(k)
 		fmt.Println("getting lock", key)
-		id1, err := client1.Lock(key, 250*time.Millisecond)
+		id1, err := client1.Lock(key, 1000*time.Millisecond)
 		fmt.Println("Returning from lock", id1, err)
 		if err != nil {
 			t.Error("Unexpected lock error: ", err)
@@ -160,14 +160,19 @@ func TestServerDrop(t *testing.T) {
 		time.Sleep(time.Duration(rand.Intn(60)) * time.Millisecond)
 		if i == 40 {
 			testDropServer()
+			fmt.Println("Dropping server after lock is acquired")
 		}
 
-		fmt.Println("Dropping server after lock is acquired")
 		fmt.Println("releasing lock", key)
 		err = client1.Unlock(key, id1)
 		if err != nil {
 			fmt.Println(key, "Already unlocked, it's ok: ", err)
-			//				t.Error("goroutine: ", ii, "Unexpected Unlock error: ", err)
+			if i != 40 {
+				t.Error("goroutine: ", i, "Unexpected Unlock error: ", err)
+			} else {
+				fmt.Println("server dropped out, safe to ignore")
+			}
+
 		} else {
 			fmt.Println("released lock", key)
 		}
