@@ -1,6 +1,7 @@
 package glock
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"time"
@@ -34,9 +35,11 @@ func (c *Client) CheckServerStatus() {
 				addEndpoints(c.consistent, down)
 			}
 
+			serverStatus := "Glock Server Status: \n"
 			for _, server := range c.consistent.Members() {
-				log.Println("Glock Server - ", server, ": ", len(c.connectionPools[server]))
+				serverStatus += fmt.Sprintln(server, ": ", len(c.connectionPools[server]))
 			}
+			log.Println(serverStatus, len(down), "down servers: ", down)
 		}
 	}()
 }
