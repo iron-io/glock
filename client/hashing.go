@@ -2,29 +2,10 @@ package glock
 
 import (
 	"fmt"
-	"log"
-	"net"
 	"time"
 
-	"github.com/stathat/consistent"
+	"github.com/iron-io/golog"
 )
-
-func initServersPool(endpoints []string) *consistent.Consistent {
-	cons := consistent.New()
-	addEndpoints(cons, endpoints)
-	return cons
-}
-
-func addEndpoints(cons *consistent.Consistent, endpoints []string) {
-	for _, endpoint := range endpoints {
-		conn, err := net.Dial("tcp", endpoint)
-		if err == nil {
-			log.Println("Adding Endpoint to glock servers: ", endpoint)
-			cons.Add(endpoint)
-			conn.Close()
-		}
-	}
-}
 
 func (c *Client) CheckServerStatus() {
 	ticker := time.Tick(60 * time.Second)
@@ -32,14 +13,14 @@ func (c *Client) CheckServerStatus() {
 		for _ = range ticker {
 			down := downServers(c.endpoints, c.consistent.Members())
 			if len(down) > 0 {
-				addEndpoints(c.consistent, down)
+				c.addEndpoints(down)
 			}
 
 			serverStatus := "Glock Server Status: \n"
 			for _, server := range c.consistent.Members() {
 				serverStatus += fmt.Sprintln(server, ": ", len(c.connectionPools[server]))
 			}
-			log.Println(serverStatus, len(down), "down servers: ", down)
+			golog.Infoln(serverStatus, len(down), "down servers: ", down)
 		}
 	}()
 }
