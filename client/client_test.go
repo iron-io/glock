@@ -12,7 +12,7 @@ import (
 )
 
 func TestLockUnlock(t *testing.T) {
-	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 10)
+	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 10, "test")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -57,7 +57,7 @@ func TestLockUnlock(t *testing.T) {
 }
 
 func TestConnectionDrop(t *testing.T) {
-	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 10)
+	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 10, "test")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -98,7 +98,7 @@ func (c *Client) testClose() {
 }
 
 func TestConcurrency(t *testing.T) {
-	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 500)
+	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 500, "test")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -138,7 +138,7 @@ func TestConcurrency(t *testing.T) {
 }
 
 func TestServerDrop(t *testing.T) {
-	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 500)
+	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 500, "test")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}

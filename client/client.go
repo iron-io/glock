@@ -33,21 +33,26 @@ type Client struct {
 	endpoints       []string
 	consistent      *consistent.Consistent
 	connectionPools map[string]chan *connection
+	password        string
 }
 
 type connection struct {
 	endpoint string
 	conn     net.Conn
 	reader   *bufio.Reader
+	password string
 }
 
-func dial(endpoint string) (net.Conn, error) {
+func (c *Client) dial(endpoint string) (net.Conn, error)     { return dial(endpoint, c.password) }
+func (c *connection) dial(endpoint string) (net.Conn, error) { return dial(endpoint, c.password) }
+
+func dial(endpoint, password string) (net.Conn, error) {
 	conn, err := net.Dial("tcp", endpoint)
 	if err != nil {
 		return conn, err
 	}
 
-	_, err = fmt.Fprintf(conn, "AUTH %s\n", "123")
+	_, err = fmt.Fprintf(conn, "AUTH %s\n", password)
 	if err != nil {
 		return conn, err
 	}
@@ -89,8 +94,9 @@ func (c *Client) Size() int {
 	return size
 }
 
-func NewClient(endpoints []string, size int) (*Client, error) {
-	client := &Client{consistent: initServersPool(endpoints), connectionPools: make(map[string]chan *connection), endpoints: endpoints}
+func NewClient(endpoints []string, size int, password string) (*Client, error) {
+	client := &Client{connectionPools: make(map[string]chan *connection), endpoints: endpoints, password: password}
+	client.initServersPool(endpoints)
 	client.CheckServerStatus()
 	err := client.initPool(size)
 	if err != nil {
@@ -108,13 +114,13 @@ func (c *Client) initPool(size int) error {
 
 		// Init with 1 for now
 		for x := 0; x < 1; x++ {
-			conn, err := dial(endpoint)
+			conn, err := c.dial(endpoint)
 			if err != nil {
 				golog.Errorln("GlockClient - ", "Removing endpoint from hash table, endpoint: ", endpoint, " error: ", err)
 				c.consistent.Remove(endpoint)
 				break
 			}
-			c.connectionPools[endpoint] <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint}
+			c.connectionPools[endpoint] <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint, password: c.password}
 		}
 	}
 	return nil
@@ -125,12 +131,12 @@ func (c *Client) getConnection(server, key string) (*connection, error) {
 	case conn := <-c.connectionPools[server]:
 		return conn, nil
 	default:
-		conn, err := dial(server)
+		conn, err := c.dial(server)
 		if err != nil {
 			golog.Errorln("GlockClient - getConnection - ", "Dialing for ", server, err)
 			return nil, err
 		}
-		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: server}, nil
+		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: server, password: c.password}, nil
 	}
 }
 
@@ -261,7 +267,7 @@ func (c *connection) readResponse() (splits []string, err error) {
 
 func (c *connection) redial() error {
 	c.conn.Close()
-	conn, err := dial(c.endpoint)
+	conn, err := c.dial(c.endpoint)
 	if err != nil {
 		return err
 	}

@@ -8,15 +8,15 @@ import (
 	"github.com/stathat/consistent"
 )
 
-func initServersPool(endpoints []string) *consistent.Consistent {
+func (c *Client) initServersPool(endpoints []string) {
 	cons := consistent.New()
-	addEndpoints(cons, endpoints)
-	return cons
+	c.addEndpoints(cons, endpoints)
+	c.consistent = cons
 }
 
-func addEndpoints(cons *consistent.Consistent, endpoints []string) {
+func (c *Client) addEndpoints(cons *consistent.Consistent, endpoints []string) {
 	for _, endpoint := range endpoints {
-		conn, err := dial(endpoint)
+		conn, err := c.dial(endpoint)
 		if err == nil {
 			log.Println("Adding Endpoint to glock servers: ", endpoint)
 			cons.Add(endpoint)
@@ -31,7 +31,7 @@ func (c *Client) CheckServerStatus() {
 		for _ = range ticker {
 			down := downServers(c.endpoints, c.consistent.Members())
 			if len(down) > 0 {
-				addEndpoints(c.consistent, down)
+				c.addEndpoints(c.consistent, down)
 			}
 
 			serverStatus := "Glock Server Status: \n"

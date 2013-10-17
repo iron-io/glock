@@ -18,8 +18,9 @@ import (
 )
 
 type GlockConfig struct {
-	Port    int `json:"port"`
-	Logging LoggingConfig
+	Port     int `json:"port"`
+	Logging  LoggingConfig
+	Password string `json:"password"`
 }
 
 type LoggingConfig struct {
@@ -39,8 +40,10 @@ var locks = map[string]*timeoutLock{}
 func main() {
 	var port int
 	var configFile string
+	var password string
 	flag.IntVar(&port, "p", 45625, "port")
 	flag.StringVar(&configFile, "config", "", "Name of the the file that contains config information")
+	flag.StringVar(&password, "pass", "test", "Password for this server")
 	flag.Parse()
 
 	var config GlockConfig
@@ -50,6 +53,10 @@ func main() {
 
 	if config.Port == 0 {
 		config.Port = port
+	}
+
+	if config.Password == "" {
+		config.Password = password
 	}
 
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(config.Port))
@@ -68,7 +75,7 @@ func main() {
 			golog.Errorln("error accepting", err)
 			return
 		}
-		go authConn(conn)
+		go authConn(conn, config.Password)
 	}
 }
 
@@ -83,17 +90,19 @@ var (
 	errUnauthorized   = []byte("ERROR unauthorized\n")
 )
 
-func authConn(conn net.Conn) {
+func authConn(conn net.Conn, password string) {
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		split := strings.Fields(scanner.Text())
 		cmd := split[0]
 		pass := split[1]
-		if cmd != "AUTH" || pass != "123" {
+		if cmd != "AUTH" || pass != password {
+			golog.Errorln("Unauthorized: ", split)
 			conn.Write(errUnauthorized)
 			conn.Close()
 			return
 		} else {
+			golog.Debugln("Authorized: ", split)
 			conn.Write(authorizedResponse)
 			break
 		}
