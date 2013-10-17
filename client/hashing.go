@@ -26,7 +26,7 @@ func addEndpoints(cons *consistent.Consistent, endpoints []string) {
 }
 
 func (c *Client) CheckServerStatus() {
-	ticker := time.Tick(1 * time.Second)
+	ticker := time.Tick(60 * time.Second)
 	go func() {
 		for _ = range ticker {
 			down := downServers(c.endpoints, c.consistent.Members())
