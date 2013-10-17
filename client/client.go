@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/iron-io/golog"
-
 	"github.com/stathat/consistent"
 )
 
@@ -33,6 +32,7 @@ type Client struct {
 	endpoints       []string
 	consistent      *consistent.Consistent
 	connectionPools map[string]chan *connection
+	poolSize        int
 }
 
 type connection struct {
@@ -62,9 +62,10 @@ func (c *Client) Size() int {
 }
 
 func NewClient(endpoints []string, size int) (*Client, error) {
-	client := &Client{consistent: initServersPool(endpoints), connectionPools: make(map[string]chan *connection), endpoints: endpoints}
-	client.CheckServerStatus()
+	client := &Client{consistent: consistent.New(), connectionPools: make(map[string]chan *connection), endpoints: endpoints,
+		poolSize: size}
 	err := client.initPool(size)
+	client.CheckServerStatus()
 	if err != nil {
 		golog.Errorln("GlockClient - ", "Initing pool ", err)
 		return nil, err
@@ -75,38 +76,53 @@ func NewClient(endpoints []string, size int) (*Client, error) {
 }
 
 func (c *Client) initPool(size int) error {
-	for _, endpoint := range c.endpoints {
-		c.connectionPools[endpoint] = make(chan *connection, size)
-
-		// Init with 1 for now
-		for x := 0; x < 1; x++ {
-			conn, err := net.Dial("tcp", endpoint)
-			if err != nil {
-				golog.Errorln("GlockClient - ", "Removing endpoint from hash table, endpoint: ", endpoint, " error: ", err)
-				c.consistent.Remove(endpoint)
-				break
-			}
-			c.connectionPools[endpoint] <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint}
-		}
-	}
+	c.addEndpoints(c.endpoints)
 	return nil
 }
 
-func (c *Client) getConnection(server, key string) (*connection, error) {
+func (c *Client) addEndpoints(endpoints []string) {
+	for _, endpoint := range endpoints {
+		golog.Infoln("GlockClient -", "Attempting to add endpoint:", endpoint)
+		conn, err := net.Dial("tcp", endpoint)
+		if err == nil {
+			c.connectionPools[endpoint] = make(chan *connection, c.poolSize)
+			c.connectionPools[endpoint] <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint}
+			c.consistent.Add(endpoint)
+			golog.Infoln("GlockClient -", "Added endpoint:", endpoint)
+		} else {
+			golog.Errorln("GlockClient -", "Error adding endoint, could not connect, not added. endpoint:", endpoint, "error:", err)
+		}
+	}
+}
+
+func (c *Client) getConnection(key string) (*connection, error) {
+	server, err := c.consistent.Get(key)
+	if err != nil {
+		golog.Errorln("GlockClient -", "Consistent hashing error, could not get server for key:", key, "error:", err)
+		return nil, err
+	}
+	golog.Debugln("GlockClient -", "in getConn, got server", server, "for key", key)
 	select {
 	case conn := <-c.connectionPools[server]:
 		return conn, nil
 	default:
+		golog.Infoln("GlockClient - Creating new connection... server:", server)
 		conn, err := net.Dial("tcp", server)
 		if err != nil {
-			golog.Errorln("GlockClient - getConnection - ", "Dialing for ", server, err)
+			golog.Errorln("GlockClient - getConnection - could not connect to:", server, "error:", err)
+			c.removeEndpoint(server)
 			return nil, err
 		}
 		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: server}, nil
 	}
 }
 
-func (c *Client) releaseConnection(server, key string, connection *connection) {
+func (c *Client) releaseConnection(key string, connection *connection) {
+	server, err := c.consistent.Get(key)
+	if err != nil {
+		golog.Errorln("GlockClient -", "Consistent hashing error, could not get server for key:", key, "error:", err)
+	}
+	golog.Debugln("GlockClient -", "in releaseConn, got server", server, "for key", key)
 	select {
 	case c.connectionPools[server] <- connection:
 	default:
@@ -116,30 +132,28 @@ func (c *Client) releaseConnection(server, key string, connection *connection) {
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
 	// its important that we get the server before we do getConnection (instead of inside getConnection) because if that error drops we need to put the connection back to the original mapping.
-	server, err := c.consistent.Get(key)
-	if err != nil {
-		golog.Errorln("GlockClient - ", "Consistent hasing error, key: ", key, " error: ", err)
-		return id, err
-	}
 
-	connection, err := c.getConnection(server, key)
+	connection, err := c.getConnection(key)
 	if err != nil {
 		return id, err
 	}
-	defer c.releaseConnection(server, key, connection)
+	defer c.releaseConnection(key, connection)
 
 	id, err = connection.lock(key, duration)
 	if err != nil {
 		if err, ok := err.(*glockError); ok {
 			if err.errType == connectionErr {
-				golog.Errorln("GlockClient - ", "Removing endpoint from hash table, server: ", server, " error: ", err)
-				c.consistent.Remove(connection.endpoint)
+				golog.Errorln("GlockClient -", "Connection error, couldn't get lock. Removing endpoint from hash table, server: ", connection.endpoint, " error: ", err)
+				c.removeEndpoint(connection.endpoint)
 				// todo for evan/treeder, if it is a connection error remove the failed server and then lock again recursively
 				return c.Lock(key, duration)
 			} else {
-				golog.Errorln("GlockClient - ", "unexpected error: ", err)
+				golog.Errorln("GlockClient -", "unexpected error: ", err)
 				return id, err
 			}
+		} else {
+			golog.Errorln("GlockClient -", "Error trying to get lock. endpoint: ", connection.endpoint, " error: ", err)
+			return id, err
 		}
 	}
 	return id, nil
@@ -148,7 +162,7 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 func (c *connection) lock(key string, duration time.Duration) (id int64, err error) {
 	err = c.fprintf("LOCK %s %d\n", key, int(duration/time.Millisecond))
 	if err != nil {
-		golog.Errorln("GlockClient - ", "lock error: ", err)
+		golog.Errorln("GlockClient -", "lock error: ", err)
 		return id, err
 	}
 
@@ -166,17 +180,20 @@ func (c *connection) lock(key string, duration time.Duration) (id int64, err err
 	return id, nil
 }
 
-func (c *Client) Unlock(key string, id int64) (err error) {
-	server, err := c.consistent.Get(key)
-	if err != nil {
-		return err
-	}
+func (c *Client) removeEndpoint(endpoint string) {
+	// remove from hash first
+	c.consistent.Remove(endpoint)
+	// then we should get rid of all the connections, might be a race somewhere with this.
+	c.connectionPools[endpoint] = nil
+}
 
-	connection, err := c.getConnection(server, key)
+func (c *Client) Unlock(key string, id int64) (err error) {
+
+	connection, err := c.getConnection(key)
 	if err != nil {
 		return err
 	}
-	defer c.releaseConnection(server, key, connection)
+	defer c.releaseConnection(key, connection)
 
 	err = connection.fprintf("UNLOCK %s %d\n", key, id)
 	if err != nil {
