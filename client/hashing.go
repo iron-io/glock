@@ -3,7 +3,6 @@ package glock
 import (
 	"fmt"
 	"log"
-	"net"
 	"time"
 
 	"github.com/stathat/consistent"
@@ -17,7 +16,7 @@ func initServersPool(endpoints []string) *consistent.Consistent {
 
 func addEndpoints(cons *consistent.Consistent, endpoints []string) {
 	for _, endpoint := range endpoints {
-		conn, err := net.Dial("tcp", endpoint)
+		conn, err := dial(endpoint)
 		if err == nil {
 			log.Println("Adding Endpoint to glock servers: ", endpoint)
 			cons.Add(endpoint)
