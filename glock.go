@@ -89,21 +89,16 @@ func authConn(conn net.Conn) {
 		split := strings.Fields(scanner.Text())
 		cmd := split[0]
 		pass := split[1]
-		if cmd != "AUTH" {
+		if cmd != "AUTH" || pass != "123" {
 			conn.Write(errUnauthorized)
 			conn.Close()
 			return
-			if pass != "123" {
-				conn.Write(errUnauthorized)
-				conn.Close()
-				return
-			}
 		} else {
 			conn.Write(authorizedResponse)
 			break
 		}
 	}
-	go handleConn(conn)
+	handleConn(conn)
 }
 
 func handleConn(conn net.Conn) {
