@@ -64,7 +64,7 @@ func (c *Client) Size() int {
 func NewClient(endpoints []string, size int) (*Client, error) {
 	client := &Client{consistent: consistent.New(), connectionPools: make(map[string]chan *connection), endpoints: endpoints,
 		poolSize: size}
-	err := client.initPool(size)
+	err := client.initPool()
 	client.CheckServerStatus()
 	if err != nil {
 		golog.Errorln("GlockClient - ", "Initing pool ", err)
@@ -75,7 +75,7 @@ func NewClient(endpoints []string, size int) (*Client, error) {
 	return client, nil
 }
 
-func (c *Client) initPool(size int) error {
+func (c *Client) initPool() error {
 	c.addEndpoints(c.endpoints)
 	return nil
 }
