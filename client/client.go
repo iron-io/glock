@@ -117,14 +117,10 @@ func (c *Client) getConnection(key string) (*connection, error) {
 	}
 }
 
-func (c *Client) releaseConnection(key string, connection *connection) {
-	server, err := c.consistent.Get(key)
-	if err != nil {
-		golog.Errorln("GlockClient -", "Consistent hashing error, could not get server for key:", key, "error:", err)
-	}
-	golog.Debugln("GlockClient -", "in releaseConn, got server", server, "for key", key)
+func (c *Client) releaseConnection(connection *connection) {
+	// todo: sometimes this pool could be nil, should maybe check that first
 	select {
-	case c.connectionPools[server] <- connection:
+	case c.connectionPools[connection.endpoint] <- connection:
 	default:
 		connection.Close()
 	}
@@ -137,7 +133,7 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 	if err != nil {
 		return id, err
 	}
-	defer c.releaseConnection(key, connection)
+	defer c.releaseConnection(connection)
 
 	id, err = connection.lock(key, duration)
 	if err != nil {
@@ -193,7 +189,7 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 	if err != nil {
 		return err
 	}
-	defer c.releaseConnection(key, connection)
+	defer c.releaseConnection(connection)
 
 	err = connection.fprintf("UNLOCK %s %d\n", key, id)
 	if err != nil {
