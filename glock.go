@@ -52,7 +52,7 @@ func main() {
 		config.Port = port
 	}
 
-	listener, err := net.Listen("tcp", "0.0.0.0:"+strconv.Itoa(config.Port))
+	listener, err := net.Listen("tcp", ":"+strconv.Itoa(config.Port))
 	if err != nil {
 		log.Fatalln("error listening", err)
 	}
