@@ -39,6 +39,34 @@ type connection struct {
 	reader   *bufio.Reader
 }
 
+func dial(endpoint string) (net.Conn, error) {
+	conn, err := net.Dial("tcp", endpoint)
+	if err != nil {
+		return conn, err
+	}
+
+	_, err = fmt.Fprintf(conn, "AUTH %s\n", "123")
+	if err != nil {
+		return conn, err
+	}
+
+	reader := bufio.NewReader(conn)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+
+	trimmedResponse := strings.TrimRight(response, "\n")
+	splits := strings.Split(trimmedResponse, " ")
+	if splits[0] == "ERROR" {
+		return nil, errors.New(trimmedResponse)
+	}
+
+	log.Println(response)
+
+	return conn, nil
+}
+
 // func (c *Client) ClosePool() error {
 // 	size := len(c.connectionPool)
 // 	for x := 0; x < size; x++ {
@@ -77,7 +105,7 @@ func (c *Client) initPool(size int) error {
 
 		// Init with 1 for now
 		for x := 0; x < 1; x++ {
-			conn, err := net.Dial("tcp", endpoint)
+			conn, err := dial(endpoint)
 			if err != nil {
 				c.consistent.Remove(endpoint)
 				break
@@ -93,7 +121,7 @@ func (c *Client) getConnection(server, key string) (*connection, error) {
 	case conn := <-c.connectionPools[server]:
 		return conn, nil
 	default:
-		conn, err := net.Dial("tcp", server)
+		conn, err := dial(server)
 		if err != nil {
 			return nil, err
 		}
@@ -221,7 +249,7 @@ func (c *connection) readResponse() (splits []string, err error) {
 
 func (c *connection) redial() error {
 	c.conn.Close()
-	conn, err := net.Dial("tcp", c.endpoint)
+	conn, err := dial(c.endpoint)
 	if err != nil {
 		return err
 	}

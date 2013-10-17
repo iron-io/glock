@@ -36,18 +36,43 @@ func main() {
 			log.Println("error accepting", err)
 			return
 		}
-		go handleConn(conn)
+		go authConn(conn)
 	}
 }
 
 var (
 	unlockedResponse    = []byte("UNLOCKED\n")
 	notUnlockedResponse = []byte("NOT_UNLOCKED\n")
+	authorizedResponse  = []byte("AUTHORIZED\n")
 
 	errBadFormat      = []byte("ERROR bad command format\n")
 	errUnknownCommand = []byte("ERROR unknown command\n")
 	errLockNotFound   = []byte("ERROR lock not found\n")
+	errUnauthorized   = []byte("ERROR unauthorized\n")
 )
+
+func authConn(conn net.Conn) {
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		split := strings.Fields(scanner.Text())
+		cmd := split[0]
+		pass := split[1]
+		if cmd != "AUTH" {
+			conn.Write(errUnauthorized)
+			conn.Close()
+			return
+			if pass != "123" {
+				conn.Write(errUnauthorized)
+				conn.Close()
+				return
+			}
+		} else {
+			conn.Write(authorizedResponse)
+			break
+		}
+	}
+	go handleConn(conn)
+}
 
 func handleConn(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
