@@ -48,18 +48,19 @@ func main() {
 		LoadConfig(configFile, &config)
 	}
 
-	if config.Port != 0 {
-		port = config.Port
+	if config.Port == 0 {
+		config.Port = port
 	}
 
-	listener, err := net.Listen("tcp", ":"+strconv.Itoa(port))
+	listener, err := net.Listen("tcp", ":"+strconv.Itoa(config.Port))
 	if err != nil {
 		log.Fatalln("error listening", err)
 	}
 
 	golog.SetLogLevel(config.Logging.Level)
 	golog.SetLogLocation(config.Logging.To, config.Logging.Prefix)
-	golog.Infoln("Glock Server available at port ", port)
+
+	golog.Infoln("Glock Server available at port ", config.Port)
 
 	for {
 		conn, err := listener.Accept()
