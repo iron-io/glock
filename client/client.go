@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iron-io/golog"
+
 	"github.com/stathat/consistent"
 )
 
@@ -92,10 +94,11 @@ func NewClient(endpoints []string, size int) (*Client, error) {
 	client.CheckServerStatus()
 	err := client.initPool(size)
 	if err != nil {
+		golog.Errorln("GlockClient - ", "Initing pool ", err)
 		return nil, err
 	}
 
-	log.Printf("Init with connection pool of %d to Glock server", size)
+	golog.Debugf("Init with connection pool of %d to Glock server", size)
 	return client, nil
 }
 
@@ -107,6 +110,7 @@ func (c *Client) initPool(size int) error {
 		for x := 0; x < 1; x++ {
 			conn, err := dial(endpoint)
 			if err != nil {
+				golog.Errorln("GlockClient - ", "Removing endpoint from hash table, endpoint: ", endpoint, " error: ", err)
 				c.consistent.Remove(endpoint)
 				break
 			}
@@ -123,6 +127,7 @@ func (c *Client) getConnection(server, key string) (*connection, error) {
 	default:
 		conn, err := dial(server)
 		if err != nil {
+			golog.Errorln("GlockClient - getConnection - ", "Dialing for ", server, err)
 			return nil, err
 		}
 		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: server}, nil
@@ -141,6 +146,7 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 	// its important that we get the server before we do getConnection (instead of inside getConnection) because if that error drops we need to put the connection back to the original mapping.
 	server, err := c.consistent.Get(key)
 	if err != nil {
+		golog.Errorln("GlockClient - ", "Consistent hasing error, key: ", key, " error: ", err)
 		return id, err
 	}
 
@@ -154,10 +160,12 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 	if err != nil {
 		if err, ok := err.(*glockError); ok {
 			if err.errType == connectionErr {
+				golog.Errorln("GlockClient - ", "Removing endpoint from hash table, server: ", server, " error: ", err)
 				c.consistent.Remove(connection.endpoint)
 				// todo for evan/treeder, if it is a connection error remove the failed server and then lock again recursively
 				return c.Lock(key, duration)
 			} else {
+				golog.Errorln("GlockClient - ", "unexpected error: ", err)
 				return id, err
 			}
 		}
@@ -168,11 +176,13 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 func (c *connection) lock(key string, duration time.Duration) (id int64, err error) {
 	err = c.fprintf("LOCK %s %d\n", key, int(duration/time.Millisecond))
 	if err != nil {
+		golog.Errorln("GlockClient - ", "lock error: ", err)
 		return id, err
 	}
 
 	splits, err := c.readResponse()
 	if err != nil {
+		golog.Errorln("GlockClient - ", "Lock readResponse error: ", err)
 		return id, err
 	}
 
@@ -198,11 +208,13 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 
 	err = connection.fprintf("UNLOCK %s %d\n", key, id)
 	if err != nil {
+		golog.Errorln("GlockClient - ", "unlock error: ", err)
 		return err
 	}
 
 	splits, err := connection.readResponse()
 	if err != nil {
+		golog.Errorln("GlockClient - ", "unlock readResponse error: ", err)
 		return err
 	}
 
