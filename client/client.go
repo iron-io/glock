@@ -120,7 +120,9 @@ func (c *Client) getConnection(key string) (*connection, error) {
 }
 
 func (c *Client) releaseConnection(connection *connection) {
+	c.poolsLock.RLock()
 	connectionPool, ok := c.connectionPools[connection.endpoint]
+	c.poolsLock.RUnlock()
 
 	if !ok {
 		connection.Close()
@@ -198,7 +200,9 @@ func (c *Client) removeEndpoint(endpoint string) {
 
 	c.poolsLock.Lock()
 	defer c.poolsLock.Unlock()
-	c.connectionPools[endpoint] = nil
+	if _, ok := c.connectionPools[endpoint]; ok {
+		delete(c.connectionPools, endpoint)
+	}
 }
 
 func (c *Client) Unlock(key string, id int64) (err error) {
