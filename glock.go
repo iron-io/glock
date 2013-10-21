@@ -52,6 +52,10 @@ func main() {
 		config.Port = port
 	}
 
+	if config.Logging.Level == "" {
+		config.Logging.Level = "debug"
+	}
+
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(config.Port))
 	if err != nil {
 		log.Fatalln("error listening", err)

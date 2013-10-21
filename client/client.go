@@ -120,8 +120,9 @@ func (c *Client) getConnection(key string) (*connection, error) {
 }
 
 func (c *Client) releaseConnection(connection *connection) {
+	c.poolsLock.RLock()
 	connectionPool, ok := c.connectionPools[connection.endpoint]
-
+	c.poolsLock.RUnlock()
 	if !ok {
 		connection.Close()
 		return
@@ -185,9 +186,7 @@ func (c *connection) lock(key string, duration time.Duration) (id int64, err err
 }
 
 func (c *Client) removeEndpoint(endpoint string) {
-	
 	golog.Errorln("GlockClient -", "Removing endpoint: ", endpoint)
-	
 	// remove from hash first
 	c.consistent.Remove(endpoint)
 	// then we should get rid of all the connections
@@ -201,7 +200,9 @@ func (c *Client) removeEndpoint(endpoint string) {
 
 	c.poolsLock.Lock()
 	defer c.poolsLock.Unlock()
-	c.connectionPools[endpoint] = nil
+	if _, ok := c.connectionPools[endpoint]; ok {
+		delete(c.connectionPools, endpoint)
+	}
 }
 
 func (c *Client) Unlock(key string, id int64) (err error) {
