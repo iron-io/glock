@@ -151,14 +151,12 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 				c.removeEndpoint(connection.endpoint)
 				// todo for evan/treeder, if it is a connection error remove the failed server and then lock again recursively
 				return c.Lock(key, duration)
-			} else {
-				golog.Errorln("GlockClient -", "unexpected error: ", err)
-				return id, err
 			}
-		} else {
-			golog.Errorln("GlockClient -", "Error trying to get lock. endpoint: ", connection.endpoint, " error: ", err)
+			golog.Errorln("GlockClient -", "unexpected error: ", err)
 			return id, err
 		}
+		golog.Errorln("GlockClient -", "Error trying to get lock. endpoint: ", connection.endpoint, " error: ", err)
+		return id, err
 	}
 	return id, nil
 }
