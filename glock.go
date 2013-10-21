@@ -111,7 +111,7 @@ func handleConn(conn net.Conn) {
 
 			if err != nil {
 				conn.Write(errBadFormat)
-				golog.Errorln(errBadFormat, ": ", split)
+				golog.Errorln(string(errBadFormat), ": ", split)
 				continue
 			}
 			locksLock.RLock()
@@ -146,8 +146,8 @@ func handleConn(conn net.Conn) {
 			id, err := strconv.ParseInt(split[2], 10, 64)
 
 			if err != nil {
-				golog.Errorln(errBadFormat, ": ", split)
 				conn.Write(errBadFormat)
+				golog.Errorln(string(errBadFormat), ": ", split)
 				continue
 			}
 			locksLock.RLock()
@@ -155,7 +155,7 @@ func handleConn(conn net.Conn) {
 			locksLock.RUnlock()
 			if !ok {
 				conn.Write(errLockNotFound)
-				golog.Errorln(errLockNotFound, ": ", split)
+				golog.Errorln(string(errLockNotFound), ": ", split)
 
 				golog.Debugf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
 				golog.Debugf("Response: %-12s | Key:  %-15s", "404", key)
@@ -176,7 +176,7 @@ func handleConn(conn net.Conn) {
 
 		default:
 			conn.Write(errUnknownCommand)
-			golog.Errorln(errUnknownCommand, ": ", split)
+			golog.Errorln(string(errUnknownCommand), ": ", split)
 			continue
 		}
 	}
