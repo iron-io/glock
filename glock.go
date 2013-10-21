@@ -40,7 +40,7 @@ func main() {
 	var port int
 	var configFile string
 	flag.IntVar(&port, "p", 45625, "port")
-	flag.StringVar(&configFile, "config", "", "Name of the the file that contains config information")
+	flag.StringVar(&configFile, "c", "", "Name of the the file that contains config information")
 	flag.Parse()
 
 	var config GlockConfig

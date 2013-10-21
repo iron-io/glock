@@ -28,6 +28,8 @@ func TestPingPong(t *testing.T) {
 			break
 		}
 	}
+}
+
 var glockServers []string
 
 func init2() {
