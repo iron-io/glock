@@ -14,19 +14,13 @@ import (
 	"github.com/stathat/consistent"
 )
 
-type glockError struct {
-	errType string
-	Err     error
+type connectionError struct {
+	error
 }
 
-func (e *glockError) Error() string {
-	return e.Err.Error()
+type internalError struct {
+	error
 }
-
-var (
-	connectionErr string = "Connection Error"
-	internalErr   string = "Internal Error"
-)
 
 type Client struct {
 	endpoints       []string
@@ -145,15 +139,11 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 
 	id, err = connection.lock(key, duration)
 	if err != nil {
-		if err, ok := err.(*glockError); ok {
-			if err.errType == connectionErr {
-				golog.Errorln("GlockClient -", "Connection error, couldn't get lock. Removing endpoint from hash table, server: ", connection.endpoint, " error: ", err)
-				c.removeEndpoint(connection.endpoint)
-				// todo for evan/treeder, if it is a connection error remove the failed server and then lock again recursively
-				return c.Lock(key, duration)
-			}
-			golog.Errorln("GlockClient -", "unexpected error: ", err)
-			return id, err
+		if err, ok := err.(*connectionError); ok {
+			golog.Errorln("GlockClient -", "Connection error, couldn't get lock. Removing endpoint from hash table, server: ", connection.endpoint, " error: ", err)
+			c.removeEndpoint(connection.endpoint)
+			// todo for evan/treeder, if it is a connection error remove the failed server and then lock again recursively
+			return c.Lock(key, duration)
 		}
 		golog.Errorln("GlockClient -", "Error trying to get lock. endpoint: ", connection.endpoint, " error: ", err)
 		return id, err
@@ -176,7 +166,7 @@ func (c *connection) lock(key string, duration time.Duration) (id int64, err err
 
 	id, err = strconv.ParseInt(splits[1], 10, 64)
 	if err != nil {
-		return id, &glockError{errType: internalErr, Err: err}
+		return id, &internalError{err}
 	}
 
 	return id, nil
@@ -238,7 +228,7 @@ func (c *connection) fprintf(format string, a ...interface{}) error {
 		if err != nil {
 			err = c.redial()
 			if err != nil {
-				return &glockError{errType: connectionErr, Err: err}
+				return &internalError{err}
 			}
 		} else {
 			break
@@ -251,13 +241,13 @@ func (c *connection) readResponse() (splits []string, err error) {
 	response, err := c.reader.ReadString('\n')
 	golog.Debugln("GlockClient -", "glockResponse: ", response)
 	if err != nil {
-		return nil, &glockError{errType: connectionErr, Err: err}
+		return nil, &connectionError{err}
 	}
 
 	trimmedResponse := strings.TrimRight(response, "\n")
 	splits = strings.Split(trimmedResponse, " ")
 	if splits[0] == "ERROR" {
-		return nil, &glockError{errType: internalErr, Err: errors.New(trimmedResponse)}
+		return nil, &internalError{errors.New(trimmedResponse)}
 	}
 
 	return splits, nil
