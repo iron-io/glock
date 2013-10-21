@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -123,7 +122,6 @@ func (c *Client) releaseConnection(connection *connection) {
 	c.poolsLock.RLock()
 	connectionPool, ok := c.connectionPools[connection.endpoint]
 	c.poolsLock.RUnlock()
-
 	if !ok {
 		connection.Close()
 		return
@@ -187,6 +185,7 @@ func (c *connection) lock(key string, duration time.Duration) (id int64, err err
 }
 
 func (c *Client) removeEndpoint(endpoint string) {
+	golog.Errorln("GlockClient -", "Removing endpoint: ", endpoint)
 	// remove from hash first
 	c.consistent.Remove(endpoint)
 	// then we should get rid of all the connections
@@ -221,7 +220,7 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 
 	splits, err := connection.readResponse()
 	if err != nil {
-		golog.Errorln("GlockClient - ", "unlock readResponse error: ", err)
+		golog.Errorln("GlockClient -", "unlock readResponse error: ", err)
 		return err
 	}
 
@@ -252,7 +251,7 @@ func (c *connection) fprintf(format string, a ...interface{}) error {
 
 func (c *connection) readResponse() (splits []string, err error) {
 	response, err := c.reader.ReadString('\n')
-	log.Println("glockResponse: ", response)
+	golog.Debugln("GlockClient -", "glockResponse: ", response)
 	if err != nil {
 		return nil, &glockError{errType: connectionErr, Err: err}
 	}
