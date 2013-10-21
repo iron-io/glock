@@ -11,8 +11,15 @@ import (
 	"time"
 )
 
+var glockServers []string
+
+func init2() {
+	glockServers = []string{"glock01.iron.io:45625"} //"localhost:45625", "localhost:45626", "localhost:45627"}
+}
+
 func TestLockUnlock(t *testing.T) {
-	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 10)
+	init2()
+	client1, err := NewClient(glockServers, 10)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -57,7 +64,7 @@ func TestLockUnlock(t *testing.T) {
 }
 
 func TestConnectionDrop(t *testing.T) {
-	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 10)
+	client1, err := NewClient(glockServers, 10)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -98,7 +105,7 @@ func (c *Client) testClose() {
 }
 
 func TestConcurrency(t *testing.T) {
-	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 500)
+	client1, err := NewClient(glockServers, 500)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -138,7 +145,7 @@ func TestConcurrency(t *testing.T) {
 }
 
 func TestServerDrop(t *testing.T) {
-	client1, err := NewClient([]string{"localhost:45625", "localhost:45626", "localhost:45627"}, 500)
+	client1, err := NewClient(glockServers, 500)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
