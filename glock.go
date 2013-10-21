@@ -79,6 +79,7 @@ func main() {
 var (
 	unlockedResponse    = []byte("UNLOCKED\n")
 	notUnlockedResponse = []byte("NOT_UNLOCKED\n")
+	pongResponse        = []byte("PONG\n")
 
 	errBadFormat      = []byte("ERROR bad command format\n")
 	errUnknownCommand = []byte("ERROR unknown command\n")
@@ -89,10 +90,18 @@ func handleConn(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		split := strings.Fields(scanner.Text())
+
+		if split[0] == "PING" {
+			conn.Write(pongResponse)
+			golog.Debugf("PING PONG")
+			continue
+		}
+
 		if len(split) < 3 {
 			conn.Write(errBadFormat)
 			continue
 		}
+
 		cmd := split[0]
 		key := split[1]
 		switch cmd {

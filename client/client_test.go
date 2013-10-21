@@ -1,9 +1,11 @@
 package glock
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"math/rand"
+	"net"
 	"os/exec"
 	"strings"
 	"sync"
@@ -11,6 +13,21 @@ import (
 	"time"
 )
 
+func TestPingPong(t *testing.T) {
+	conn, err := net.Dial("tcp", "localhost:45625")
+	if err != nil {
+		t.Error("Unexpected connection error: ", err)
+	}
+	fmt.Fprintf(conn, "PING\n")
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		split := strings.Fields(scanner.Text())
+		if split[0] != "PONG" {
+			t.Error("Unexpected ping error: ", err)
+		} else {
+			break
+		}
+	}
 var glockServers []string
 
 func init2() {
