@@ -30,14 +30,9 @@ func TestPingPong(t *testing.T) {
 	}
 }
 
-var glockServers []string
-
-func init2() {
-	glockServers = []string{"glock01.iron.io:45625"} //"localhost:45625", "localhost:45626", "localhost:45627"}
-}
+var glockServers = []string{"glock01.iron.io:45625"} //"localhost:45625", "localhost:45626", "localhost:45627"}
 
 func TestLockUnlock(t *testing.T) {
-	init2()
 	client1, err := NewClient(glockServers, 10)
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
