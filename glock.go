@@ -35,6 +35,7 @@ type timeoutLock struct {
 
 var locksLock sync.RWMutex
 var locks = map[string]*timeoutLock{}
+var config GlockConfig
 
 func main() {
 	var port int
@@ -43,7 +44,6 @@ func main() {
 	flag.StringVar(&configFile, "c", "", "Name of the the file that contains config information")
 	flag.Parse()
 
-	var config GlockConfig
 	if configFile != "" {
 		LoadConfig(configFile, &config)
 	}
@@ -53,7 +53,7 @@ func main() {
 	}
 
 	if config.Logging.Level == "" {
-		config.Logging.Level = "info"
+		config.Logging.Level = "debug"
 	}
 
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(config.Port))
@@ -133,13 +133,13 @@ func handleConn(conn net.Conn) {
 			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
 				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 					lock.mutex.Unlock()
-					golog.Debugf("Timedout: %-12d | Key:  %-15s | Id: %d", timeout, key, id)
+					golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
 				}
 			})
 			fmt.Fprintf(conn, "LOCKED %v\n", id)
 
-			golog.Debugf("Request:  %-12s | Key:  %-15s | Timeout: %dms", cmd, key, timeout)
-			golog.Debugf("Response: %-12s | Key:  %-15s | Id: %d", "LOCKED", key, id)
+			golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Timeout: %dms", config.Port, cmd, key, timeout)
+			golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "LOCKED", key, id)
 
 		// UNLOCK <key> <id>
 		case "UNLOCK":
@@ -155,23 +155,23 @@ func handleConn(conn net.Conn) {
 			locksLock.RUnlock()
 			if !ok {
 				conn.Write(errLockNotFound)
-				golog.Errorln(string(errLockNotFound), ": ", split)
 
-				golog.Debugf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				golog.Debugf("Response: %-12s | Key:  %-15s", "404", key)
+				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
+				golog.Errorln(string(errLockNotFound), ": ", split, "| P ", config.Port)
+				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s", config.Port, "404", key)
 				continue
 			}
 			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 				lock.mutex.Unlock()
 				conn.Write(unlockedResponse)
 
-				golog.Debugf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				golog.Debugf("Response: %-12s | Key:  %-15s | Id: %d", "UNLOCKED", key, id)
+				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
+				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
 			} else {
 				conn.Write(notUnlockedResponse)
 
-				golog.Debugf("Request:  %-12s | Key:  %-15s | Id: %d", cmd, key, id)
-				golog.Debugf("Response: %-12s | Key:  %-15s | Id: %d", "NOT_UNLOCKED", key, id)
+				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
+				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
 			}
 
 		default:

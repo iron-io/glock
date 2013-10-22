@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var glockServers = []string{"localhost:45625"} //"localhost:45625", "localhost:45626", "localhost:45627"}
+var glockServers = []string{"localhost:45625", "localhost:45626", "localhost:45627"}
 
 func TestPingPong(t *testing.T) {
 	conn, err := net.Dial("tcp", glockServers[0])
