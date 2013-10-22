@@ -80,8 +80,13 @@ func (c *Client) addEndpoints(endpoints []string) {
 		golog.Infoln("GlockClient -", "Attempting to add endpoint:", endpoint)
 		conn, err := net.Dial("tcp", endpoint)
 		if err == nil {
-			c.connectionPools[endpoint] = make(chan *connection, c.poolSize)
-			c.connectionPools[endpoint] <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint}
+			pool := make(chan *connection, c.poolSize)
+			pool <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint}
+
+			c.poolsLock.Lock()
+			c.connectionPools[endpoint] = pool
+			c.poolsLock.Unlock()
+
 			c.consistent.Add(endpoint)
 			golog.Infoln("GlockClient -", "Added endpoint:", endpoint)
 		} else {
@@ -97,8 +102,16 @@ func (c *Client) getConnection(key string) (*connection, error) {
 		return nil, err
 	}
 	golog.Debugln("GlockClient -", "in getConn, got server", server, "for key", key)
+
+	c.poolsLock.RLock()
+	connectionPool, ok := c.connectionPools[server]
+	c.poolsLock.RUnlock()
+	if !ok {
+		return nil, errors.New("connectionPool removed")
+	}
+
 	select {
-	case conn := <-c.connectionPools[server]:
+	case conn := <-connectionPool:
 		return conn, nil
 	default:
 		golog.Infoln("GlockClient - Creating new connection... server:", server)
