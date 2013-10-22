@@ -13,8 +13,10 @@ import (
 	"time"
 )
 
+var glockServers = []string{"localhost:45625"} //"localhost:45625", "localhost:45626", "localhost:45627"}
+
 func TestPingPong(t *testing.T) {
-	conn, err := net.Dial("tcp", "localhost:45625")
+	conn, err := net.Dial("tcp", glockServers[0])
 	if err != nil {
 		t.Error("Unexpected connection error: ", err)
 	}
@@ -29,8 +31,6 @@ func TestPingPong(t *testing.T) {
 		}
 	}
 }
-
-var glockServers = []string{"glock01.iron.io:45625"} //"localhost:45625", "localhost:45626", "localhost:45627"}
 
 func TestLockUnlock(t *testing.T) {
 	client1, err := NewClient(glockServers, 10)
