@@ -35,6 +35,10 @@ type timeoutLock struct {
 
 var locksLock sync.RWMutex
 var locks = map[string]*timeoutLock{}
+
+var semaphoresLock sync.RWMutex
+var semaphores map[string]Semaphore
+
 var config GlockConfig
 
 func main() {
@@ -66,6 +70,8 @@ func main() {
 
 	golog.Infoln("Glock Server available at port ", config.Port)
 
+	semaphores = make(map[string]Semaphore)
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -81,9 +87,16 @@ var (
 	notUnlockedResponse = []byte("NOT_UNLOCKED\r\n")
 	pongResponse        = []byte("PONG\r\n")
 
-	errBadFormat      = []byte("ERROR bad command format\r\n")
-	errUnknownCommand = []byte("ERROR unknown command\r\n")
-	errLockNotFound   = []byte("ERROR lock not found\r\n")
+	// semaphore related responses
+	pushedResponse  = []byte("PUSHED\r\n")
+	fullResponse    = []byte("FULL\r\n")
+	poppedResponse  = []byte("POPPED\r\n")
+	createdResponse = []byte("CREATED\r\n")
+
+	errBadFormat                 = []byte("ERROR bad command format\r\n")
+	errUnknownCommand            = []byte("ERROR unknown command\r\n")
+	errLockNotFound              = []byte("ERROR lock not found\r\n")
+	errSemaphoreNotFoundResponse = []byte("ERROR semaphore not found\r\n")
 )
 
 func handleConn(conn net.Conn) {
@@ -174,6 +187,44 @@ func handleConn(conn net.Conn) {
 				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
 			}
 
+		case "SET":
+			size, err := strconv.Atoi(split[2])
+			if err != nil {
+				conn.Write(errBadFormat)
+				continue
+			}
+
+			semaphoresLock.Lock()
+			semaphores[key] = NewSemaphore(size)
+			semaphoresLock.Unlock()
+			conn.Write(createdResponse)
+
+		case "PUSH":
+			semaphoresLock.RLock()
+			semaphore, ok := semaphores[key]
+			semaphoresLock.RUnlock()
+			if !ok {
+				conn.Write(errSemaphoreNotFoundResponse)
+				continue
+			}
+
+			if semaphore.Push() {
+				conn.Write(pushedResponse)
+			} else {
+				conn.Write(fullResponse)
+			}
+
+		case "POP":
+			semaphoresLock.RLock()
+			semaphore, ok := semaphores[key]
+			semaphoresLock.RUnlock()
+			if !ok {
+				conn.Write(errSemaphoreNotFoundResponse)
+				continue
+			}
+
+			semaphore.Pop()
+			conn.Write(poppedResponse)
 		default:
 			conn.Write(errUnknownCommand)
 			golog.Errorln(string(errUnknownCommand), ": ", split)
@@ -193,4 +244,25 @@ func LoadConfig(configFile string, config interface{}) {
 		log.Fatalln("Couldn't unmarshal config!", err)
 	}
 	golog.Infoln("config:", config)
+}
+
+type Semaphore chan struct{}
+
+func NewSemaphore(size int) Semaphore {
+	return make(Semaphore, size)
+}
+
+// Non-blocking lock
+func (s Semaphore) Push() bool {
+	select {
+	case s <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+	return false
+}
+
+func (s Semaphore) Pop() {
+	<-s
 }
