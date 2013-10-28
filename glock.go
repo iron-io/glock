@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -87,6 +88,15 @@ var (
 )
 
 func handleConn(conn net.Conn) {
+	defer func() {
+		conn.Close()
+		// make sure a panic doesn't take down the whole server
+		err := recover()
+		if err != nil {
+			golog.Errorf("recovered from panic: %v\n%s\n", err, debug.Stack())
+		}
+	}()
+
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		split := strings.Fields(scanner.Text())
