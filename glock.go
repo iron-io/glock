@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"flag"
-	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -87,6 +87,17 @@ var (
 	errLockNotFound   = []byte("ERROR lock not found\r\n")
 )
 
+type command struct {
+	handler func(args []string) []byte
+	argCount int
+}
+
+var commands = map[string]command {
+	"PING": {ping, 0},
+	"LOCK": {lock, 2},
+	"UNLOCK": {unlock, 2},
+}
+
 func handleConn(conn net.Conn) {
 	defer func() {
 		conn.Close()
@@ -100,96 +111,94 @@ func handleConn(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		split := strings.Fields(scanner.Text())
-
-		if split[0] == "PING" {
-			conn.Write(pongResponse)
-			golog.Debugf("PING PONG")
-			continue
-		}
-
-		if len(split) < 3 {
-			conn.Write(errBadFormat)
-			continue
-		}
-
-		cmd := split[0]
-		key := split[1]
-		switch cmd {
-		// LOCK <key> <timeout>
-		case "LOCK":
-			timeout, err := strconv.Atoi(split[2])
-
-			if err != nil {
-				conn.Write(errBadFormat)
-				golog.Errorln(string(errBadFormat), ": ", split)
-				continue
-			}
-			locksLock.RLock()
-			lock, ok := locks[key]
-			locksLock.RUnlock()
-			if !ok {
-				// lock doesn't exist; create it
-				locksLock.Lock()
-				lock, ok = locks[key]
-				if !ok {
-					lock = &timeoutLock{}
-					locks[key] = lock
-				}
-				locksLock.Unlock()
-			}
-
-			lock.mutex.Lock()
-			id := atomic.AddInt64(&lock.id, 1)
-			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
-				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-					lock.mutex.Unlock()
-					golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
-				}
-			})
-			fmt.Fprintf(conn, "LOCKED %v\n", id)
-
-			golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Timeout: %dms", config.Port, cmd, key, timeout)
-			golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "LOCKED", key, id)
-
-		// UNLOCK <key> <id>
-		case "UNLOCK":
-			id, err := strconv.ParseInt(split[2], 10, 64)
-
-			if err != nil {
-				conn.Write(errBadFormat)
-				golog.Errorln(string(errBadFormat), ": ", split)
-				continue
-			}
-			locksLock.RLock()
-			lock, ok := locks[key]
-			locksLock.RUnlock()
-			if !ok {
-				conn.Write(errLockNotFound)
-
-				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
-				golog.Errorln(string(errLockNotFound), ": ", split, "| P ", config.Port)
-				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s", config.Port, "404", key)
-				continue
-			}
-			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-				lock.mutex.Unlock()
-				conn.Write(unlockedResponse)
-
-				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
-				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
-			} else {
-				conn.Write(notUnlockedResponse)
-
-				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
-				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
-			}
-
-		default:
+		cmd, ok := commands[split[0]]
+		if !ok {
 			conn.Write(errUnknownCommand)
 			golog.Errorln(string(errUnknownCommand), ": ", split)
 			continue
 		}
+
+		if len(split) - 1 != cmd.argCount {
+			conn.Write(errBadFormat)
+			continue
+		}
+
+		resp := cmd.handler(split[1:])
+		_, err := conn.Write(resp)
+		if err != nil {
+			if err != io.EOF {
+				golog.Errorln("error writing response:", err)
+			}
+			break
+		}
 	}
+}
+
+// PING
+func ping([]string) []byte {
+	return pongResponse
+}
+
+// LOCK <key> <timeout>
+func lock(args []string) []byte {
+	key := args[0]
+	timeout, err := strconv.Atoi(args[1])
+
+	if err != nil {
+		golog.Errorln(string(errBadFormat), ": ", args)
+		return errBadFormat
+	}
+	locksLock.RLock()
+	lock, ok := locks[key]
+	locksLock.RUnlock()
+	if !ok {
+		// lock doesn't exist; create it
+		locksLock.Lock()
+		lock, ok = locks[key]
+		if !ok {
+			lock = &timeoutLock{}
+			locks[key] = lock
+		}
+		locksLock.Unlock()
+	}
+
+	lock.mutex.Lock()
+	id := atomic.AddInt64(&lock.id, 1)
+	time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
+		if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+			lock.mutex.Unlock()
+			golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
+		}
+	})
+
+	resp := make([]byte, 0, len("LOCKED \r\n") + 10)
+	resp = append(resp, "LOCKED "...)
+	resp = strconv.AppendInt(resp, id, 10)
+	resp = append(resp, "\r\n"...)
+	return resp
+}
+
+// UNLOCK <key> <id>
+func unlock(args []string) []byte {
+	key := args[0]
+
+	id, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil {
+		golog.Errorln(string(errBadFormat), ": ", args)
+		return errBadFormat
+	}
+
+	locksLock.RLock()
+	lock, ok := locks[key]
+	locksLock.RUnlock()
+	if !ok {
+		return errLockNotFound
+	}
+	if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+		lock.mutex.Unlock()
+		return unlockedResponse
+	}
+	return notUnlockedResponse
 }
 
 func LoadConfig(configFile string, config interface{}) {
