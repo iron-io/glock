@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iron-io/golog"
@@ -28,6 +29,10 @@ type Client struct {
 	poolsLock       sync.RWMutex
 	connectionPools map[string]chan *connection
 	poolSize        int
+
+	// some refactoring required to embed this as a part of connectionPools
+	connectionCount map[string]*int32
+	countLock       sync.RWMutex
 }
 
 type connection struct {
@@ -58,7 +63,7 @@ func (c *Client) Size() int {
 
 func NewClient(endpoints []string, size int) (*Client, error) {
 	client := &Client{consistent: consistent.New(), connectionPools: make(map[string]chan *connection), endpoints: endpoints,
-		poolSize: size}
+		poolSize: size, connectionCount: make(map[string]*int32)}
 	err := client.initPool()
 	if err != nil {
 		golog.Errorln("GlockClient - ", "Initing pool ", err)
@@ -87,6 +92,10 @@ func (c *Client) addEndpoints(endpoints []string) {
 			c.connectionPools[endpoint] = pool
 			c.poolsLock.Unlock()
 
+			c.countLock.Lock()
+			c.connectionCount[endpoint] = new(int32)
+			c.countLock.Unlock()
+
 			c.consistent.Add(endpoint)
 			golog.Infoln("GlockClient -", "Added endpoint:", endpoint)
 		} else {
@@ -109,6 +118,10 @@ func (c *Client) getConnection(key string) (*connection, error) {
 	if !ok {
 		return nil, errors.New("connectionPool removed")
 	}
+
+	c.countLock.Lock()
+	atomic.AddInt32(c.connectionCount[server], 1)
+	c.countLock.Unlock()
 
 	select {
 	case conn := <-connectionPool:
@@ -139,6 +152,10 @@ func (c *Client) releaseConnection(connection *connection) {
 	default:
 		connection.Close()
 	}
+
+	c.countLock.Lock()
+	atomic.AddInt32(c.connectionCount[connection.endpoint], -1)
+	c.countLock.Unlock()
 }
 
 func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) {
@@ -199,10 +216,16 @@ func (c *Client) removeEndpoint(endpoint string) {
 	}
 
 	c.poolsLock.Lock()
-	defer c.poolsLock.Unlock()
 	if _, ok := c.connectionPools[endpoint]; ok {
 		delete(c.connectionPools, endpoint)
 	}
+	c.poolsLock.Unlock()
+
+	c.countLock.Lock()
+	if _, ok := c.connectionCount[endpoint]; ok {
+		delete(c.connectionCount, endpoint)
+	}
+	c.countLock.Unlock()
 }
 
 func (c *Client) Unlock(key string, id int64) (err error) {
