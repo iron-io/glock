@@ -18,7 +18,7 @@ func (c *Client) CheckServerStatus() {
 
 			serverStatus := "Glock Server Status: \n"
 			for _, server := range c.consistent.Members() {
-				serverStatus += fmt.Sprintln(server, ": ", len(c.connectionPools[server]))
+				serverStatus += fmt.Sprintln(server, ": ", "available - ", len(c.connectionPools[server]), "total - ", int(*c.connectionCount[server])+len(c.connectionPools[server]))
 			}
 			golog.Infoln(serverStatus, len(down), "down servers: ", down)
 		}
