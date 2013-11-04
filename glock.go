@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -89,13 +90,34 @@ var (
 
 type command struct {
 	handler func(args []string) []byte
-	argCount int
+	args    []string
 }
 
-var commands = map[string]command {
-	"PING": {ping, 0},
-	"LOCK": {lock, 2},
-	"UNLOCK": {unlock, 2},
+var commands = map[string]command{
+	"PING":   {ping, []string{}},
+	"LOCK":   {lock, []string{"Key", "T/O"}},
+	"UNLOCK": {unlock, []string{"Key", "Id"}},
+}
+
+func glog(logType string, requestId int, comm string) {
+	golog.Debugf("%-5d %5d %-8s: %-25s", config.Port, requestId, logType, comm)
+}
+
+func (c command) logRequest(requestId int, split []string) {
+	var comm string
+	for index, arg := range c.args {
+		comm += fmt.Sprint(arg, ": ", split[index], " | ")
+	}
+	glog("Request", requestId, comm)
+}
+
+func increment(requestId int) int {
+	if requestId > 99999 {
+		requestId = 1
+	} else {
+		requestId += 1
+	}
+	return requestId
 }
 
 func handleConn(conn net.Conn) {
@@ -108,6 +130,7 @@ func handleConn(conn net.Conn) {
 		}
 	}()
 
+	var requestId int
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		split := strings.Fields(scanner.Text())
@@ -118,12 +141,18 @@ func handleConn(conn net.Conn) {
 			continue
 		}
 
-		if len(split) - 1 != cmd.argCount {
+		requestId = increment(requestId)
+		cmd.logRequest(requestId, split[1:])
+
+		if len(split)-1 != len(cmd.args) {
 			conn.Write(errBadFormat)
+			golog.Errorln(string(errBadFormat), ": ", split)
 			continue
 		}
 
 		resp := cmd.handler(split[1:])
+		glog("Response", requestId, string(resp))
+
 		_, err := conn.Write(resp)
 		if err != nil {
 			if err != io.EOF {
@@ -171,7 +200,7 @@ func lock(args []string) []byte {
 		}
 	})
 
-	resp := make([]byte, 0, len("LOCKED \r\n") + 10)
+	resp := make([]byte, 0, len("LOCKED \r\n")+10)
 	resp = append(resp, "LOCKED "...)
 	resp = strconv.AppendInt(resp, id, 10)
 	resp = append(resp, "\r\n"...)
