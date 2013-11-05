@@ -99,25 +99,16 @@ var commands = map[string]command{
 	"UNLOCK": {unlock, []string{"Key", "Id"}},
 }
 
-func glog(logType string, requestId int, comm string) {
+func glog(logType string, requestId uint16, comm string) {
 	golog.Debugf("%-5d %5d %-8s: %-25s", config.Port, requestId, logType, comm)
 }
 
-func (c command) logRequest(requestId int, split []string) {
+func (c command) logRequest(requestId uint16, split []string) {
 	var comm string
 	for index, arg := range c.args {
 		comm += fmt.Sprint(arg, ": ", split[index], " | ")
 	}
 	glog("Request", requestId, comm)
-}
-
-func increment(requestId int) int {
-	if requestId > 99999 {
-		requestId = 1
-	} else {
-		requestId += 1
-	}
-	return requestId
 }
 
 func handleConn(conn net.Conn) {
@@ -130,7 +121,7 @@ func handleConn(conn net.Conn) {
 		}
 	}()
 
-	var requestId int
+	var requestId uint16
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		split := strings.Fields(scanner.Text())
@@ -141,7 +132,7 @@ func handleConn(conn net.Conn) {
 			continue
 		}
 
-		requestId = increment(requestId)
+		requestId++
 		cmd.logRequest(requestId, split[1:])
 
 		if len(split)-1 != len(cmd.args) {
