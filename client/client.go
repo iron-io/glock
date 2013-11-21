@@ -23,6 +23,10 @@ type internalError struct {
 	error
 }
 
+type CapacityError struct {
+	error
+}
+
 type Client struct {
 	endpoints       []string
 	consistent      *consistent.Consistent
@@ -283,6 +287,9 @@ func (c *connection) readResponse() (splits []string, err error) {
 	trimmedResponse := strings.TrimRight(response, "\r\n")
 	splits = strings.Split(trimmedResponse, " ")
 	if splits[0] == "ERROR" {
+		if splits[3] == "capacity" {
+			return nil, &CapacityError{errors.New(trimmedResponse)}
+		}
 		return nil, &internalError{errors.New(trimmedResponse)}
 	}
 

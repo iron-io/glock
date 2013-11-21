@@ -59,6 +59,10 @@ func main() {
 		config.Logging.Level = "debug"
 	}
 
+	if config.LockLimit == 0 {
+		config.LockLimit = 1000
+	}
+
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(config.Port))
 	if err != nil {
 		log.Fatalln("error listening", err)
