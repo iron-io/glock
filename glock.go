@@ -215,11 +215,17 @@ func LoadConfig(configFile string, config interface{}) {
 // ...continue as normal...
 
 func (l *timeoutLock) lockMutex() bool {
-	if atomic.LoadInt64(&l.lockCount) > config.LockLimit {
-		return false
-	}
+	for {
+		count := atomic.LoadInt64(&l.lockCount)
+		if count >= config.LockLimit {
+			return false
+		}
 
-	atomic.AddInt64(&l.lockCount, 1)
+		if atomic.CompareAndSwapInt64(&l.lockCount, count, count+1) {
+			break
+		}
+
+	}
 	l.mutex.Lock()
 	return true
 }
