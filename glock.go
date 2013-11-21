@@ -19,8 +19,9 @@ import (
 )
 
 type GlockConfig struct {
-	Port    int `json:"port"`
-	Logging LoggingConfig
+	Port      int `json:"port"`
+	Logging   LoggingConfig
+	LockLimit int64 `json:"lock_limit"`
 }
 
 type LoggingConfig struct {
@@ -30,8 +31,9 @@ type LoggingConfig struct {
 }
 
 type timeoutLock struct {
-	mutex sync.Mutex
-	id    int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
+	mutex     sync.Mutex
+	id        int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
+	lockCount int64
 }
 
 var locksLock sync.RWMutex
@@ -85,6 +87,7 @@ var (
 	errBadFormat      = []byte("ERROR bad command format\r\n")
 	errUnknownCommand = []byte("ERROR unknown command\r\n")
 	errLockNotFound   = []byte("ERROR lock not found\r\n")
+	errLockAtCapacity = []byte("ERROR lock at capacity\r\n")
 )
 
 func handleConn(conn net.Conn) {
@@ -203,4 +206,25 @@ func LoadConfig(configFile string, config interface{}) {
 		log.Fatalln("Couldn't unmarshal config!", err)
 	}
 	golog.Infoln("config:", config)
+}
+
+// Example:
+// if !lock.lockMutex() {
+// 	conn.Write(errLockAtCapacity)
+// }
+// ...continue as normal...
+
+func (l *timeoutLock) lockMutex() bool {
+	if atomic.LoadInt64(&l.lockCount) > config.LockLimit {
+		return false
+	}
+
+	atomic.AddInt64(&l.lockCount, 1)
+	l.mutex.Lock()
+	return true
+}
+
+func (l *timeoutLock) unLockMutex() {
+	l.mutex.Unlock()
+	atomic.AddInt64(&l.lockCount, -1)
 }
