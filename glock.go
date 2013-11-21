@@ -88,10 +88,10 @@ var (
 	notUnlockedResponse = []byte("NOT_UNLOCKED\r\n")
 	pongResponse        = []byte("PONG\r\n")
 
-	errBadFormat      = []byte("ERROR bad command format\r\n")
-	errUnknownCommand = []byte("ERROR unknown command\r\n")
-	errLockNotFound   = []byte("ERROR lock not found\r\n")
-	errLockAtCapacity = []byte("ERROR lock at capacity\r\n")
+	errBadFormat      = []byte("ERROR 400 bad command format\r\n")
+	errUnknownCommand = []byte("ERROR 405 unknown command\r\n")
+	errLockNotFound   = []byte("ERROR 404 lock not found\r\n")
+	errLockAtCapacity = []byte("ERROR 503 lock at capacity\r\n")
 )
 
 func handleConn(conn net.Conn) {

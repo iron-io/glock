@@ -287,7 +287,7 @@ func (c *connection) readResponse() (splits []string, err error) {
 	trimmedResponse := strings.TrimRight(response, "\r\n")
 	splits = strings.Split(trimmedResponse, " ")
 	if splits[0] == "ERROR" {
-		if splits[3] == "capacity" {
+		if splits[1] == "503" {
 			return nil, &CapacityError{errors.New(trimmedResponse)}
 		}
 		return nil, &internalError{errors.New(trimmedResponse)}
