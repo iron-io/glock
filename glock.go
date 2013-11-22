@@ -59,10 +59,6 @@ func main() {
 		config.Logging.Level = "debug"
 	}
 
-	if config.LockLimit == 0 {
-		config.LockLimit = 1000
-	}
-
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(config.Port))
 	if err != nil {
 		log.Fatalln("error listening", err)
@@ -219,16 +215,17 @@ func LoadConfig(configFile string, config interface{}) {
 // ...continue as normal...
 
 func (l *timeoutLock) lockMutex() bool {
-	for {
-		count := atomic.LoadInt64(&l.lockCount)
-		if count >= config.LockLimit {
-			return false
-		}
+	if config.LockLimit != 0 {
+		for {
+			count := atomic.LoadInt64(&l.lockCount)
+			if count >= config.LockLimit {
+				return false
+			}
 
-		if atomic.CompareAndSwapInt64(&l.lockCount, count, count+1) {
-			break
+			if atomic.CompareAndSwapInt64(&l.lockCount, count, count+1) {
+				break
+			}
 		}
-
 	}
 	l.mutex.Lock()
 	return true
@@ -236,5 +233,7 @@ func (l *timeoutLock) lockMutex() bool {
 
 func (l *timeoutLock) unLockMutex() {
 	l.mutex.Unlock()
-	atomic.AddInt64(&l.lockCount, -1)
+	if config.LockLimit != 0 {
+		atomic.AddInt64(&l.lockCount, -1)
+	}
 }
