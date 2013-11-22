@@ -19,8 +19,9 @@ import (
 )
 
 type GlockConfig struct {
-	Port      int   `json:"port"`
-	LockLimit int64 `json:"lock_limit"`
+	Port      int    `json:"port"`
+	LockLimit int64  `json:"lock_limit"`
+	Password  string `json:"password"`
 	Logging   LoggingConfig
 }
 
@@ -43,8 +44,10 @@ var config GlockConfig
 func main() {
 	var port int
 	var configFile string
+	var password string
 	flag.IntVar(&port, "p", 45625, "port")
 	flag.StringVar(&configFile, "c", "", "Name of the the file that contains config information")
+	flag.StringVar(&password, "k", "", "Password")
 	flag.Parse()
 
 	if configFile != "" {
@@ -57,6 +60,10 @@ func main() {
 
 	if config.Logging.Level == "" {
 		config.Logging.Level = "debug"
+	}
+
+	if config.Password == "" {
+		config.Password = password
 	}
 
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(config.Port))
@@ -75,7 +82,7 @@ func main() {
 			golog.Errorln("error accepting", err)
 			return
 		}
-		go handleConn(conn)
+		go authConn(conn)
 	}
 }
 
@@ -83,12 +90,36 @@ var (
 	unlockedResponse    = []byte("UNLOCKED\r\n")
 	notUnlockedResponse = []byte("NOT_UNLOCKED\r\n")
 	pongResponse        = []byte("PONG\r\n")
+	authorizedResponse  = []byte("AUTHORIZED\r\n")
 
 	errBadFormat      = []byte("ERROR 400 bad command format\r\n")
-	errUnknownCommand = []byte("ERROR 405 unknown command\r\n")
+	errUnauthorized   = []byte("ERROR 403 unauthorized\n")
 	errLockNotFound   = []byte("ERROR 404 lock not found\r\n")
+	errUnknownCommand = []byte("ERROR 405 unknown command\r\n")
 	errLockAtCapacity = []byte("ERROR 503 lock at capacity\r\n")
 )
+
+func authConn(conn net.Conn) {
+	if config.Password != "" {
+		scanner := bufio.NewScanner(conn)
+		for scanner.Scan() {
+			split := strings.Fields(scanner.Text())
+			cmd := split[0]
+			if cmd != "AUTH" || split[1] != config.Password {
+				golog.Errorln("Unauthorized: ", split)
+				conn.Write(errUnauthorized)
+				conn.Close()
+				return
+			} else {
+				golog.Debugln("Authorized: ", split)
+				conn.Write(authorizedResponse)
+				break
+			}
+		}
+	}
+
+	handleConn(conn)
+}
 
 func handleConn(conn net.Conn) {
 	defer func() {

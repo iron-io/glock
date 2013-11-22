@@ -34,7 +34,7 @@ func TestPingPong(t *testing.T) {
 }
 
 func TestLockUnlock(t *testing.T) {
-	client1, err := NewClient(glockServers, 10)
+	client1, err := NewClient(glockServers, 10, "test_password")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -101,7 +101,7 @@ func TestLockLimit(t *testing.T) {
 }
 
 func TestConnectionDrop(t *testing.T) {
-	client1, err := NewClient(glockServers, 10)
+	client1, err := NewClient(glockServers, 10, "test_password")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -142,7 +142,7 @@ func (c *Client) testClose() {
 }
 
 func TestConcurrency(t *testing.T) {
-	client1, err := NewClient(glockServers, 500)
+	client1, err := NewClient(glockServers, 500, "test_password")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -182,7 +182,7 @@ func TestConcurrency(t *testing.T) {
 }
 
 func TestServerDrop(t *testing.T) {
-	client1, err := NewClient(glockServers, 500)
+	client1, err := NewClient(glockServers, 500, "test_password")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}

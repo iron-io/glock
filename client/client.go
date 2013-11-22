@@ -33,6 +33,7 @@ type Client struct {
 	poolsLock       sync.RWMutex
 	connectionPools map[string]chan *connection
 	poolSize        int
+	password        string
 
 	// some refactoring required to embed this as a part of connectionPools
 	connectionCount map[string]*int32
@@ -43,6 +44,7 @@ type connection struct {
 	endpoint string
 	conn     net.Conn
 	reader   *bufio.Reader
+	password string
 }
 
 // func (c *Client) ClosePool() error {
@@ -65,9 +67,9 @@ func (c *Client) Size() int {
 	return size
 }
 
-func NewClient(endpoints []string, size int) (*Client, error) {
+func NewClient(endpoints []string, size int, password string) (*Client, error) {
 	client := &Client{consistent: consistent.New(), connectionPools: make(map[string]chan *connection), endpoints: endpoints,
-		poolSize: size, connectionCount: make(map[string]*int32)}
+		poolSize: size, connectionCount: make(map[string]*int32), password: password}
 	err := client.initPool()
 	if err != nil {
 		golog.Errorln("GlockClient - ", "Initing pool ", err)
@@ -87,10 +89,10 @@ func (c *Client) initPool() error {
 func (c *Client) addEndpoints(endpoints []string) {
 	for _, endpoint := range endpoints {
 		golog.Infoln("GlockClient -", "Attempting to add endpoint:", endpoint)
-		conn, err := net.Dial("tcp", endpoint)
+		conn, err := dial(endpoint, c.password)
 		if err == nil {
 			pool := make(chan *connection, c.poolSize)
-			pool <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint}
+			pool <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint, password: c.password}
 
 			c.poolsLock.Lock()
 			c.connectionPools[endpoint] = pool
@@ -132,13 +134,13 @@ func (c *Client) getConnection(key string) (*connection, error) {
 		return conn, nil
 	default:
 		golog.Infoln("GlockClient - Creating new connection... server:", server)
-		conn, err := net.Dial("tcp", server)
+		conn, err := dial(server, c.password)
 		if err != nil {
 			golog.Errorln("GlockClient - getConnection - could not connect to:", server, "error:", err)
 			c.removeEndpoint(server)
 			return nil, err
 		}
-		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: server}, nil
+		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: server, password: c.password}, nil
 	}
 }
 
@@ -298,7 +300,7 @@ func (c *connection) readResponse() (splits []string, err error) {
 
 func (c *connection) redial() error {
 	c.conn.Close()
-	conn, err := net.Dial("tcp", c.endpoint)
+	conn, err := dial(c.endpoint, c.password)
 	if err != nil {
 		return err
 	}
@@ -306,6 +308,34 @@ func (c *connection) redial() error {
 	c.reader = bufio.NewReader(conn)
 
 	return nil
+}
+
+func dial(endpoint, password string) (net.Conn, error) {
+	conn, err := net.Dial("tcp", endpoint)
+	if err != nil {
+		return conn, err
+	}
+
+	if password != "" {
+		_, err = fmt.Fprintf(conn, "AUTH %s\r\n", password)
+		if err != nil {
+			return conn, err
+		}
+
+		reader := bufio.NewReader(conn)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+
+		trimmedResponse := strings.TrimRight(response, "\n")
+		splits := strings.Split(trimmedResponse, " ")
+		if splits[0] == "ERROR" {
+			return nil, errors.New(trimmedResponse)
+		}
+	}
+
+	return conn, nil
 }
 
 func (c *connection) Close() error {
