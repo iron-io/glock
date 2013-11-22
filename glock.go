@@ -141,11 +141,14 @@ func handleConn(conn net.Conn) {
 				locksLock.Unlock()
 			}
 
-			lock.mutex.Lock()
+			if !lock.lockMutex() {
+				conn.Write(errLockAtCapacity)
+				continue
+			}
 			id := atomic.AddInt64(&lock.id, 1)
 			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
 				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-					lock.mutex.Unlock()
+					lock.unlockMutex()
 					golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
 				}
 			})
@@ -175,7 +178,7 @@ func handleConn(conn net.Conn) {
 				continue
 			}
 			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-				lock.mutex.Unlock()
+				lock.unlockMutex()
 				conn.Write(unlockedResponse)
 
 				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
@@ -208,12 +211,6 @@ func LoadConfig(configFile string, config interface{}) {
 	golog.Infoln("config:", config)
 }
 
-// Example:
-// if !lock.lockMutex() {
-// 	conn.Write(errLockAtCapacity)
-// }
-// ...continue as normal...
-
 func (l *timeoutLock) lockMutex() bool {
 	if config.LockLimit != 0 {
 		for {
@@ -231,7 +228,7 @@ func (l *timeoutLock) lockMutex() bool {
 	return true
 }
 
-func (l *timeoutLock) unLockMutex() {
+func (l *timeoutLock) unlockMutex() {
 	l.mutex.Unlock()
 	if config.LockLimit != 0 {
 		atomic.AddInt64(&l.lockCount, -1)

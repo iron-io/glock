@@ -3,6 +3,7 @@ package glock
 import (
 	"bufio"
 	"bytes"
+	cryptoRand "crypto/rand"
 	"fmt"
 	"math/rand"
 	"net"
@@ -75,6 +76,28 @@ func TestLockUnlock(t *testing.T) {
 	fmt.Println("1 released lock")
 
 	time.Sleep(5 * time.Second)
+}
+
+func TestLockLimit(t *testing.T) {
+	client1, err := NewClient(glockServers, 1000)
+	if err != nil {
+		t.Error("Unexpected error creating new client: ", err)
+	}
+	lockKey := randString(10)
+	for i := 0; i < 1000; i++ {
+		go client1.Lock(lockKey, 10*time.Second)
+	}
+	time.Sleep(5 * time.Second)
+
+	fmt.Println("we should expect lock error below")
+	_, err = client1.Lock(lockKey, 10*time.Second)
+	if err == nil {
+		t.Error("Should have rate limited the 1001 connection")
+	}
+
+	if err, ok := err.(*CapacityError); !ok {
+		t.Error("Expected capacity error got: ", err)
+	}
 }
 
 func TestConnectionDrop(t *testing.T) {
@@ -220,4 +243,14 @@ func testDropServer() {
 		cmd.Run()
 	}
 
+}
+
+func randString(n int) string {
+	const alphanum = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	var bytes = make([]byte, n)
+	cryptoRand.Read(bytes)
+	for i, b := range bytes {
+		bytes[i] = alphanum[b%byte(len(alphanum))]
+	}
+	return string(bytes)
 }
