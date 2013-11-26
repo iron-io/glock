@@ -19,8 +19,9 @@ import (
 )
 
 type GlockConfig struct {
-	Port    int `json:"port"`
-	Logging LoggingConfig
+	Port      int   `json:"port"`
+	LockLimit int64 `json:"lock_limit"`
+	Logging   LoggingConfig
 }
 
 type LoggingConfig struct {
@@ -30,8 +31,9 @@ type LoggingConfig struct {
 }
 
 type timeoutLock struct {
-	mutex sync.Mutex
-	id    int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
+	mutex     sync.Mutex
+	id        int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
+	lockCount int64
 }
 
 var locksLock sync.RWMutex
@@ -82,9 +84,10 @@ var (
 	notUnlockedResponse = []byte("NOT_UNLOCKED\r\n")
 	pongResponse        = []byte("PONG\r\n")
 
-	errBadFormat      = []byte("ERROR bad command format\r\n")
-	errUnknownCommand = []byte("ERROR unknown command\r\n")
-	errLockNotFound   = []byte("ERROR lock not found\r\n")
+	errBadFormat      = []byte("ERROR 400 bad command format\r\n")
+	errUnknownCommand = []byte("ERROR 405 unknown command\r\n")
+	errLockNotFound   = []byte("ERROR 404 lock not found\r\n")
+	errLockAtCapacity = []byte("ERROR 503 lock at capacity\r\n")
 )
 
 func handleConn(conn net.Conn) {
@@ -138,11 +141,14 @@ func handleConn(conn net.Conn) {
 				locksLock.Unlock()
 			}
 
-			lock.mutex.Lock()
+			if !lock.lockMutex() {
+				conn.Write(errLockAtCapacity)
+				continue
+			}
 			id := atomic.AddInt64(&lock.id, 1)
 			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
 				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-					lock.mutex.Unlock()
+					lock.unlockMutex()
 					golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
 				}
 			})
@@ -172,7 +178,7 @@ func handleConn(conn net.Conn) {
 				continue
 			}
 			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-				lock.mutex.Unlock()
+				lock.unlockMutex()
 				conn.Write(unlockedResponse)
 
 				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
@@ -203,4 +209,28 @@ func LoadConfig(configFile string, config interface{}) {
 		log.Fatalln("Couldn't unmarshal config!", err)
 	}
 	golog.Infoln("config:", config)
+}
+
+func (l *timeoutLock) lockMutex() bool {
+	if config.LockLimit != 0 {
+		for {
+			count := atomic.LoadInt64(&l.lockCount)
+			if count >= config.LockLimit {
+				return false
+			}
+
+			if atomic.CompareAndSwapInt64(&l.lockCount, count, count+1) {
+				break
+			}
+		}
+	}
+	l.mutex.Lock()
+	return true
+}
+
+func (l *timeoutLock) unlockMutex() {
+	l.mutex.Unlock()
+	if config.LockLimit != 0 {
+		atomic.AddInt64(&l.lockCount, -1)
+	}
 }
