@@ -19,9 +19,9 @@ import (
 )
 
 type GlockConfig struct {
-	Port      int `json:"port"`
-	Logging   LoggingConfig
+	Port      int   `json:"port"`
 	LockLimit int64 `json:"lock_limit"`
+	Logging   LoggingConfig
 }
 
 type LoggingConfig struct {
