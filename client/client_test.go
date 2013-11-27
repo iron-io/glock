@@ -34,7 +34,7 @@ func TestPingPong(t *testing.T) {
 }
 
 func TestLockUnlock(t *testing.T) {
-	client1, err := NewClient(glockServers, 10, "test_password")
+	client1, err := NewClient(glockServers, 10, "test_username", "test_password")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -79,7 +79,7 @@ func TestLockUnlock(t *testing.T) {
 }
 
 func TestLockLimit(t *testing.T) {
-	client1, err := NewClient(glockServers, 1000)
+	client1, err := NewClient(glockServers, 1000, "test_username", "test_password")
 	if err != nil {
 		t.Error("Unexpected error creating new client: ", err)
 	}
@@ -101,7 +101,7 @@ func TestLockLimit(t *testing.T) {
 }
 
 func TestConnectionDrop(t *testing.T) {
-	client1, err := NewClient(glockServers, 10, "test_password")
+	client1, err := NewClient(glockServers, 10, "test_username", "test_password")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -142,7 +142,7 @@ func (c *Client) testClose() {
 }
 
 func TestConcurrency(t *testing.T) {
-	client1, err := NewClient(glockServers, 500, "test_password")
+	client1, err := NewClient(glockServers, 500, "test_username", "test_password")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -182,7 +182,7 @@ func TestConcurrency(t *testing.T) {
 }
 
 func TestServerDrop(t *testing.T) {
-	client1, err := NewClient(glockServers, 500, "test_password")
+	client1, err := NewClient(glockServers, 500, "test_username", "test_password")
 	if err != nil {
 		t.Error("Unexpected new client error: ", err)
 	}
@@ -203,7 +203,7 @@ func TestServerDrop(t *testing.T) {
 		fmt.Println("GOT LOCK", key)
 		time.Sleep(time.Duration(rand.Intn(60)) * time.Millisecond)
 		if i == 40 {
-			testDropServer()
+			DropServer()
 			fmt.Println("Dropping server after lock is acquired")
 		}
 
@@ -228,7 +228,7 @@ func TestServerDrop(t *testing.T) {
 }
 
 // A little hack to simulate server dropped out
-func testDropServer() {
+func DropServer() {
 	cmd := exec.Command("pidof", "glock")
 	var out bytes.Buffer
 	cmd.Stdout = &out

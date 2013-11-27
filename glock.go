@@ -2,6 +2,10 @@ package main
 
 import (
 	"bufio"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,10 +23,10 @@ import (
 )
 
 type GlockConfig struct {
-	Port      int    `json:"port"`
-	LockLimit int64  `json:"lock_limit"`
-	Password  string `json:"password"`
-	Logging   LoggingConfig
+	Port           int               `json:"port"`
+	LockLimit      int64             `json:"lock_limit"`
+	Authentication map[string]string `json:"authentication"`
+	Logging        LoggingConfig
 }
 
 type LoggingConfig struct {
@@ -44,10 +48,10 @@ var config GlockConfig
 func main() {
 	var port int
 	var configFile string
-	var password string
+	var logLocal bool
 	flag.IntVar(&port, "p", 45625, "port")
 	flag.StringVar(&configFile, "c", "", "Name of the the file that contains config information")
-	flag.StringVar(&password, "k", "", "Password")
+	flag.BoolVar(&logLocal, "l", false, "Logging to local")
 	flag.Parse()
 
 	if configFile != "" {
@@ -62,15 +66,15 @@ func main() {
 		config.Logging.Level = "debug"
 	}
 
-	if config.Password == "" {
-		config.Password = password
-	}
-
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(config.Port))
 	if err != nil {
 		log.Fatalln("error listening", err)
 	}
 
+	if logLocal {
+		config.Logging.To = ""
+		config.Logging.Prefix = ""
+	}
 	golog.SetLogLevel(config.Logging.Level)
 	golog.SetLogLocation(config.Logging.To, config.Logging.Prefix)
 
@@ -100,21 +104,60 @@ var (
 )
 
 func authConn(conn net.Conn) {
-	if config.Password != "" {
+	if len(config.Authentication) != 0 {
+		authKey, err := randByte(24)
+		if err != nil {
+			return
+		}
+
+		authKeyBase64 := base64.StdEncoding.EncodeToString(authKey)
 		scanner := bufio.NewScanner(conn)
 		for scanner.Scan() {
 			split := strings.Fields(scanner.Text())
 			cmd := split[0]
-			if cmd != "AUTH" || split[1] != config.Password {
+			if cmd != "AUTH" || len(split) < 2 {
 				golog.Errorln("Unauthorized: ", split)
-				conn.Write(errUnauthorized)
-				conn.Close()
+				unauthorizeConn(conn)
 				return
-			} else {
-				golog.Debugln("Authorized: ", split)
-				conn.Write(authorizedResponse)
-				break
 			}
+
+			username := split[1]
+			password, ok := config.Authentication[username]
+			if !ok {
+				golog.Errorln("Unauthorized: ", split)
+				unauthorizeConn(conn)
+				return
+			}
+
+			switch len(split) {
+			case 2:
+				// Step 1: Return challege
+				// cmd: AUTH [username]
+				conn.Write([]byte(authKeyBase64 + "\r\n"))
+				continue
+			case 3:
+				// Step 2: Verify challenge
+				// cmd: AUTH [username] [expectedMAC]
+				expectedMACBase64 := split[2]
+				expectedMAC, err := base64.StdEncoding.DecodeString(expectedMACBase64)
+				if err != nil {
+					golog.Errorln("Unauthorized: ", split)
+					unauthorizeConn(conn)
+					return
+				}
+
+				if CheckMAC([]byte(password), expectedMAC, authKey) {
+					golog.Debugln("Authorized: ", split)
+					conn.Write(authorizedResponse)
+					break
+				}
+				fallthrough
+			default:
+				golog.Errorln("Unauthorized: ", split)
+				unauthorizeConn(conn)
+				return
+			}
+
 		}
 	}
 
@@ -264,4 +307,26 @@ func (l *timeoutLock) unlockMutex() {
 	if config.LockLimit != 0 {
 		atomic.AddInt64(&l.lockCount, -1)
 	}
+}
+
+func randByte(n int) ([]byte, error) {
+	bytes := make([]byte, n)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes, err
+}
+
+func CheckMAC(password, clientMAC, key []byte) bool {
+	mac := hmac.New(sha256.New, key)
+	mac.Write(password)
+	expectedMAC := mac.Sum(nil)
+	return hmac.Equal(clientMAC, expectedMAC)
+}
+
+func unauthorizeConn(conn net.Conn) {
+	conn.Write(errUnauthorized)
+	conn.Close()
 }
