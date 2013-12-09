@@ -2,6 +2,9 @@ package glock
 
 import (
 	"bufio"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -33,6 +36,8 @@ type Client struct {
 	poolsLock       sync.RWMutex
 	connectionPools map[string]chan *connection
 	poolSize        int
+	username        string
+	password        string
 
 	// some refactoring required to embed this as a part of connectionPools
 	connectionCount map[string]*int32
@@ -43,6 +48,7 @@ type connection struct {
 	endpoint string
 	conn     net.Conn
 	reader   *bufio.Reader
+	client   *Client
 }
 
 // func (c *Client) ClosePool() error {
@@ -65,9 +71,9 @@ func (c *Client) Size() int {
 	return size
 }
 
-func NewClient(endpoints []string, size int) (*Client, error) {
+func NewClient(endpoints []string, size int, username, password string) (*Client, error) {
 	client := &Client{consistent: consistent.New(), connectionPools: make(map[string]chan *connection), endpoints: endpoints,
-		poolSize: size, connectionCount: make(map[string]*int32)}
+		poolSize: size, connectionCount: make(map[string]*int32), username: username, password: password}
 	err := client.initPool()
 	if err != nil {
 		golog.Errorln("GlockClient - ", "Initing pool ", err)
@@ -87,10 +93,10 @@ func (c *Client) initPool() error {
 func (c *Client) addEndpoints(endpoints []string) {
 	for _, endpoint := range endpoints {
 		golog.Infoln("GlockClient -", "Attempting to add endpoint:", endpoint)
-		conn, err := net.Dial("tcp", endpoint)
+		conn, err := dial(endpoint, c.username, c.password)
 		if err == nil {
 			pool := make(chan *connection, c.poolSize)
-			pool <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint}
+			pool <- &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: endpoint, client: c}
 
 			c.poolsLock.Lock()
 			c.connectionPools[endpoint] = pool
@@ -132,13 +138,13 @@ func (c *Client) getConnection(key string) (*connection, error) {
 		return conn, nil
 	default:
 		golog.Infoln("GlockClient - Creating new connection... server:", server)
-		conn, err := net.Dial("tcp", server)
+		conn, err := dial(server, c.username, c.password)
 		if err != nil {
 			golog.Errorln("GlockClient - getConnection - could not connect to:", server, "error:", err)
 			c.removeEndpoint(server)
 			return nil, err
 		}
-		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: server}, nil
+		return &connection{conn: conn, reader: bufio.NewReader(conn), endpoint: server, client: c}, nil
 	}
 }
 
@@ -278,14 +284,56 @@ func (c *connection) fprintf(format string, a ...interface{}) error {
 }
 
 func (c *connection) readResponse() (splits []string, err error) {
-	response, err := c.reader.ReadString('\n')
+	splits, err = ReadSplits(c.reader)
+	if err != nil {
+		return nil, err
+	}
+
+	return splits, nil
+}
+
+func (c *connection) redial() error {
+	c.conn.Close()
+	conn, err := dial(c.endpoint, c.client.username, c.client.password)
+	if err != nil {
+		return err
+	}
+	c.conn = conn
+	c.reader = bufio.NewReader(conn)
+
+	return nil
+}
+
+func dial(endpoint, username, password string) (net.Conn, error) {
+	conn, err := net.Dial("tcp", endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	if username != "" {
+		err = authenticateConn(conn, username, password)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return conn, nil
+}
+
+func (c *connection) Close() error {
+	c.reader = nil
+	return c.conn.Close()
+}
+
+func ReadSplits(reader *bufio.Reader) ([]string, error) {
+	response, err := reader.ReadString('\n')
 	golog.Debugln("GlockClient -", "glockResponse: ", response)
 	if err != nil {
 		return nil, &connectionError{err}
 	}
 
 	trimmedResponse := strings.TrimRight(response, "\r\n")
-	splits = strings.Split(trimmedResponse, " ")
+	splits := strings.Split(trimmedResponse, " ")
 	if splits[0] == "ERROR" {
 		if splits[1] == "503" {
 			return nil, &CapacityError{errors.New(trimmedResponse)}
@@ -296,19 +344,43 @@ func (c *connection) readResponse() (splits []string, err error) {
 	return splits, nil
 }
 
-func (c *connection) redial() error {
-	c.conn.Close()
-	conn, err := net.Dial("tcp", c.endpoint)
+func authenticateConn(conn net.Conn, username, password string) error {
+	// Step 1: Pass in username for challenge
+	_, err := fmt.Fprintf(conn, "AUTH %s\r\n", username)
 	if err != nil {
 		return err
 	}
-	c.conn = conn
-	c.reader = bufio.NewReader(conn)
 
+	reader := bufio.NewReader(conn)
+	splits, err := ReadSplits(reader)
+	if err != nil {
+		return err
+	}
+
+	authKeyBase64 := splits[0]
+	authKey, err := base64.StdEncoding.DecodeString(authKeyBase64)
+	if err != nil {
+		return err
+	}
+
+	// Step 2: Pass in hashed authKey to get authenticated
+	mac := hmac.New(sha256.New, authKey)
+	mac.Write([]byte(password))
+	expectedMAC := mac.Sum(nil)
+	expectedMACBase64 := base64.StdEncoding.EncodeToString(expectedMAC)
+	_, err = fmt.Fprintf(conn, "AUTH %s %s\r\n", username, expectedMACBase64)
+	if err != nil {
+		return err
+	}
+
+	splits, err = ReadSplits(reader)
+	if err != nil {
+		return err
+	}
+	if splits[0] != "AUTHORIZED" {
+		return errors.New(strings.Join(splits, " "))
+	}
+
+	// Step 3: Successfully authenticated
 	return nil
-}
-
-func (c *connection) Close() error {
-	c.reader = nil
-	return c.conn.Close()
 }
