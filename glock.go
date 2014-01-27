@@ -2,10 +2,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,12 +10,12 @@ import (
 	"net"
 	"runtime/debug"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/iron-io/golog"
+	"io"
 )
 
 type GlockConfig struct {
@@ -39,6 +35,48 @@ type timeoutLock struct {
 	mutex     sync.Mutex
 	id        int64 // unique ID of the current lock. Only allow an unlock if the correct id is passed
 	lockCount int64
+}
+
+func (l *timeoutLock) lock() bool {
+	if config.LockLimit != 0 {
+		for {
+			count := atomic.LoadInt64(&l.lockCount)
+			if count >= config.LockLimit {
+				return false
+			}
+
+			if atomic.CompareAndSwapInt64(&l.lockCount, count, count+1) {
+				break
+			}
+		}
+	}
+	l.mutex.Lock()
+	return true
+}
+
+func (l *timeoutLock) unlock() {
+	l.mutex.Unlock()
+	if config.LockLimit != 0 {
+		atomic.AddInt64(&l.lockCount, -1)
+	}
+}
+
+// Incoming requests
+type Request struct {
+	Command  string
+	Username string // not sure if we need a username?  A global token might be fine
+	Token    string // for authentication, set in config
+	Key      string
+	Timeout  int
+	Id       int64
+}
+
+// Outgoing responses
+type Response struct {
+	Code  int
+	Msg   string
+	Id    int64
+	Error error
 }
 
 var locksLock sync.RWMutex
@@ -86,82 +124,40 @@ func main() {
 			golog.Errorln("error accepting", err)
 			return
 		}
-		go authConn(conn)
+		go handleConn(conn)
 	}
 }
 
 var (
-	unlockedResponse    = []byte("UNLOCKED\r\n")
-	notUnlockedResponse = []byte("NOT_UNLOCKED\r\n")
-	pongResponse        = []byte("PONG\r\n")
-	authorizedResponse  = []byte("AUTHORIZED\r\n")
+	unlockedResponse    = Response{Code: 200, Msg: "Unlocked"}
+	notUnlockedResponse = Response{Code: 204, Msg: "Not unlocked"}
+	pongResponse        = Response{Code: 200, Msg: "Pong"}
+	authorizedResponse  = Response{Code: 200, Msg: "Authorized"}
 
-	errBadFormat      = []byte("ERROR 400 bad command format\r\n")
-	errUnauthorized   = []byte("ERROR 403 unauthorized\n")
-	errLockNotFound   = []byte("ERROR 404 lock not found\r\n")
-	errUnknownCommand = []byte("ERROR 405 unknown command\r\n")
-	errLockAtCapacity = []byte("ERROR 503 lock at capacity\r\n")
+	errBadFormatResponse      = Response{Code: 400, Msg: "Invalid parameters for command"}
+	errUnauthorizedResponse   = Response{Code: 403, Msg: "Unauthorized"}
+	errLockNotFoundResponse   = Response{Code: 404, Msg: "Lock not found"}
+	errUnknownCommandResponse = Response{Code: 405, Msg: "Unknown command"}
+	errInternalServerResponse = Response{Code: 500, Msg: "Internal server error"}
+	errLockAtCapacityResponse = Response{Code: 503, Msg: "Lock at capacity"}
 )
 
-func authConn(conn net.Conn) {
+func authenticate(request Request) error {
 	if len(config.Authentication) != 0 {
-		authKey, err := randByte(24)
-		if err != nil {
-			return
+		password, ok := config.Authentication[request.Username]
+		if !ok {
+			err := fmt.Errorf("auth: User not found: %v", request.Username)
+			golog.Errorln(err)
+			return err
 		}
 
-		authKeyBase64 := base64.StdEncoding.EncodeToString(authKey)
-		scanner := bufio.NewScanner(conn)
-		for scanner.Scan() {
-			split := strings.Fields(scanner.Text())
-			cmd := split[0]
-			if cmd != "AUTH" || len(split) < 2 {
-				golog.Errorln("Unauthorized: ", split)
-				unauthorizeConn(conn)
-				return
-			}
-
-			username := split[1]
-			password, ok := config.Authentication[username]
-			if !ok {
-				golog.Errorln("Unauthorized: ", split)
-				unauthorizeConn(conn)
-				return
-			}
-
-			switch len(split) {
-			case 2:
-				// Step 1: Return challege
-				// cmd: AUTH [username]
-				conn.Write([]byte(authKeyBase64 + "\r\n"))
-				continue
-			case 3:
-				// Step 2: Verify challenge
-				// cmd: AUTH [username] [expectedMAC]
-				expectedMACBase64 := split[2]
-				expectedMAC, err := base64.StdEncoding.DecodeString(expectedMACBase64)
-				if err != nil {
-					golog.Errorln("Unauthorized: ", split)
-					unauthorizeConn(conn)
-					return
-				}
-
-				if CheckMAC([]byte(password), expectedMAC, authKey) {
-					golog.Debugln("Authorized: ", split)
-					conn.Write(authorizedResponse)
-					break
-				}
-				fallthrough
-			default:
-				golog.Errorln("Unauthorized: ", split)
-				unauthorizeConn(conn)
-				return
-			}
-
+		if password != request.Token {
+			err := fmt.Errorf("auth: Bad token for %v", request.Username)
+			golog.Errorln(err)
+			return err
 		}
 	}
-
-	handleConn(conn)
+	return nil
 }
 
 func handleConn(conn net.Conn) {
@@ -174,100 +170,126 @@ func handleConn(conn net.Conn) {
 		}
 	}()
 
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		split := strings.Fields(scanner.Text())
+	authenticated := false
+	if len(config.Authentication) == 0 {
+		authenticated = true
+	}
+	golog.Infoln("Handling new connection", conn)
+	dec := json.NewDecoder(bufio.NewReader(conn))
+	for {
+		var request Request
+		if err := dec.Decode(&request); err == io.EOF {
+			golog.Debugf("Got an EOF, breaking and closing this connection.")
+			break
+		} else if err != nil {
+			errResponse(conn, errBadFormatResponse, err)
+			continue
+		}
 
-		if split[0] == "PING" {
-			conn.Write(pongResponse)
+		switch request.Command {
+		case "ping":
+			respond(conn, pongResponse)
 			golog.Debugf("PING PONG")
 			continue
-		}
 
-		if len(split) < 3 {
-			conn.Write(errBadFormat)
+		case "auth":
+			err := authenticate(request)
+			if err != nil {
+				errResponse(conn, errUnauthorizedResponse, err)
+				// todo: close connection and perhaps ban IP for a bit if too many failed auths.
+				continue
+			}
+			authenticated = true
+			respond(conn, authorizedResponse)
 			continue
-		}
-
-		cmd := split[0]
-		key := split[1]
-		switch cmd {
-		// LOCK <key> <timeout>
-		case "LOCK":
-			timeout, err := strconv.Atoi(split[2])
-
-			if err != nil {
-				conn.Write(errBadFormat)
-				golog.Errorln(string(errBadFormat), ": ", split)
-				continue
-			}
-			locksLock.RLock()
-			lock, ok := locks[key]
-			locksLock.RUnlock()
-			if !ok {
-				// lock doesn't exist; create it
-				locksLock.Lock()
-				lock, ok = locks[key]
-				if !ok {
-					lock = &timeoutLock{}
-					locks[key] = lock
-				}
-				locksLock.Unlock()
-			}
-
-			if !lock.lockMutex() {
-				conn.Write(errLockAtCapacity)
-				continue
-			}
-			id := atomic.AddInt64(&lock.id, 1)
-			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
-				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-					lock.unlockMutex()
-					golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
-				}
-			})
-			fmt.Fprintf(conn, "LOCKED %v\n", id)
-
-			golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Timeout: %dms", config.Port, cmd, key, timeout)
-			golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "LOCKED", key, id)
-
-		// UNLOCK <key> <id>
-		case "UNLOCK":
-			id, err := strconv.ParseInt(split[2], 10, 64)
-
-			if err != nil {
-				conn.Write(errBadFormat)
-				golog.Errorln(string(errBadFormat), ": ", split)
-				continue
-			}
-			locksLock.RLock()
-			lock, ok := locks[key]
-			locksLock.RUnlock()
-			if !ok {
-				conn.Write(errLockNotFound)
-
-				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
-				golog.Errorln(string(errLockNotFound), ": ", split, "| P ", config.Port)
-				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s", config.Port, "404", key)
-				continue
-			}
-			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-				lock.unlockMutex()
-				conn.Write(unlockedResponse)
-
-				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
-				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
-			} else {
-				conn.Write(notUnlockedResponse)
-
-				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
-				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
-			}
 
 		default:
-			conn.Write(errUnknownCommand)
-			golog.Errorln(string(errUnknownCommand), ": ", split)
-			continue
+			if !authenticated {
+				// todo: ban IP for a bit if too many failed auths
+				errResponse(conn, errUnauthorizedResponse, nil)
+				continue
+			}
+			switch request.Command {
+			case "lock":
+
+				if request.Key == "" {
+					errResponse(conn, errBadFormatResponse, fmt.Errorf("lock command requires a key"))
+					continue
+				}
+				key := request.Key
+				timeout := request.Timeout
+				locksLock.RLock()
+				lock, ok := locks[key]
+				locksLock.RUnlock()
+				if !ok {
+					// lock doesn't exist; create it
+					locksLock.Lock()
+					lock, ok = locks[key]
+					if !ok {
+						lock = &timeoutLock{}
+						locks[key] = lock
+					}
+					locksLock.Unlock()
+				}
+
+				if !lock.lock() {
+					errResponse(conn, errLockAtCapacityResponse, nil)
+					continue
+				}
+				id := atomic.AddInt64(&lock.id, 1)
+				time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
+					if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+						lock.unlock()
+						golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
+					}
+				})
+				response := Response{Code: 200, Msg: "Locked", Id: id}
+				respond(conn, response)
+
+				golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "LOCKED", key, id)
+
+				// UNLOCK <key> <id>
+			case "unlock":
+
+				if request.Key == "" {
+					errResponse(conn, errBadFormatResponse, fmt.Errorf("unlock command requires a key"))
+					continue
+				}
+				if request.Id == 0 {
+					errResponse(conn, errBadFormatResponse, fmt.Errorf("unlock command requires an id"))
+					continue
+				}
+				key := request.Key
+				id := request.Id
+				locksLock.RLock()
+				lock, ok := locks[key]
+				locksLock.RUnlock()
+				if !ok {
+					errResponse(conn, errLockNotFoundResponse, nil)
+
+					golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+					golog.Debugf(errLockNotFoundResponse.Msg, ": ", request, "| P ", config.Port)
+					golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s", config.Port, "404", key)
+					continue
+				}
+				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+					lock.unlock()
+					respond(conn, unlockedResponse)
+
+					golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+					golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
+				} else {
+					respond(conn, notUnlockedResponse)
+
+					golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+					golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
+				}
+			default:
+				errResponse(conn, errUnknownCommandResponse, nil)
+				continue
+			}
+
 		}
 	}
 }
@@ -285,48 +307,17 @@ func LoadConfig(configFile string, config interface{}) {
 	golog.Infoln("config:", config)
 }
 
-func (l *timeoutLock) lockMutex() bool {
-	if config.LockLimit != 0 {
-		for {
-			count := atomic.LoadInt64(&l.lockCount)
-			if count >= config.LockLimit {
-				return false
-			}
-
-			if atomic.CompareAndSwapInt64(&l.lockCount, count, count+1) {
-				break
-			}
-		}
-	}
-	l.mutex.Lock()
-	return true
-}
-
-func (l *timeoutLock) unlockMutex() {
-	l.mutex.Unlock()
-	if config.LockLimit != 0 {
-		atomic.AddInt64(&l.lockCount, -1)
-	}
-}
-
-func randByte(n int) ([]byte, error) {
-	bytes := make([]byte, n)
-	_, err := rand.Read(bytes)
+func errResponse(conn net.Conn, response Response, err error) {
 	if err != nil {
-		return nil, err
+		response.Msg = err.Error()
 	}
-
-	return bytes, err
+	respond(conn, response)
 }
 
-func CheckMAC(password, clientMAC, key []byte) bool {
-	mac := hmac.New(sha256.New, key)
-	mac.Write(password)
-	expectedMAC := mac.Sum(nil)
-	return hmac.Equal(clientMAC, expectedMAC)
-}
-
-func unauthorizeConn(conn net.Conn) {
-	conn.Write(errUnauthorized)
-	conn.Close()
+func respond(conn net.Conn, response Response) {
+	b, err := json.Marshal(response)
+	if err != nil {
+		golog.Errorln("Error marshalling response:", response, err)
+	}
+	conn.Write(b)
 }
