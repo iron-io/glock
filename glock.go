@@ -47,9 +47,11 @@ var config GlockConfig
 
 func main() {
 	var port int
+	var env string
 	var configFile string
 	var logLocal bool
 	flag.IntVar(&port, "p", 45625, "port")
+	flag.StringVar(&env, "e", "", "Environment")
 	flag.StringVar(&configFile, "c", "", "Name of the the file that contains config information")
 	flag.BoolVar(&logLocal, "l", false, "Logging to local")
 	flag.Parse()
