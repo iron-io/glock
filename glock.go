@@ -211,86 +211,92 @@ func handleConn(conn net.Conn) {
 			}
 			switch request.Command {
 			case "lock":
-
-				if request.Key == "" {
-					errResponse(conn, errBadFormatResponse, fmt.Errorf("lock command requires a key"))
-					continue
-				}
-				key := request.Key
-				timeout := request.Timeout
-				locksLock.RLock()
-				lock, ok := locks[key]
-				locksLock.RUnlock()
-				if !ok {
-					// lock doesn't exist; create it
-					locksLock.Lock()
-					lock, ok = locks[key]
-					if !ok {
-						lock = &timeoutLock{}
-						locks[key] = lock
-					}
-					locksLock.Unlock()
-				}
-
-				if !lock.lock() {
-					errResponse(conn, errLockAtCapacityResponse, nil)
-					continue
-				}
-				id := atomic.AddInt64(&lock.id, 1)
-				time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
-					if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-						lock.unlock()
-						golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
-					}
-				})
-				response := Response{Code: 200, Msg: "Locked", Id: id}
-				respond(conn, response)
-
-				golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
-				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "LOCKED", key, id)
-
+				lock(conn, request)
 				// UNLOCK <key> <id>
 			case "unlock":
-
-				if request.Key == "" {
-					errResponse(conn, errBadFormatResponse, fmt.Errorf("unlock command requires a key"))
-					continue
-				}
-				if request.Id == 0 {
-					errResponse(conn, errBadFormatResponse, fmt.Errorf("unlock command requires an id"))
-					continue
-				}
-				key := request.Key
-				id := request.Id
-				locksLock.RLock()
-				lock, ok := locks[key]
-				locksLock.RUnlock()
-				if !ok {
-					errResponse(conn, errLockNotFoundResponse, nil)
-
-					golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
-					golog.Debugf(errLockNotFoundResponse.Msg, ": ", request, "| P ", config.Port)
-					golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s", config.Port, "404", key)
-					continue
-				}
-				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-					lock.unlock()
-					respond(conn, unlockedResponse)
-
-					golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
-					golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
-				} else {
-					respond(conn, notUnlockedResponse)
-
-					golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
-					golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
-				}
+				unlock(conn, request)
 			default:
 				errResponse(conn, errUnknownCommandResponse, nil)
 				continue
 			}
 
 		}
+	}
+}
+
+func lock(conn net.Conn, request Request) {
+	if request.Key == "" {
+		errResponse(conn, errBadFormatResponse, fmt.Errorf("lock command requires a key"))
+		return
+	}
+	key := request.Key
+	timeout := request.Timeout
+	locksLock.RLock()
+	lock, ok := locks[key]
+	locksLock.RUnlock()
+	if !ok {
+		// lock doesn't exist; create it
+		locksLock.Lock()
+		lock, ok = locks[key]
+		if !ok {
+			lock = &timeoutLock{}
+			locks[key] = lock
+		}
+		locksLock.Unlock()
+	}
+
+	if !lock.lock() {
+		errResponse(conn, errLockAtCapacityResponse, nil)
+		return
+	}
+	id := atomic.AddInt64(&lock.id, 1)
+	time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
+		if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+			lock.unlock()
+			golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
+		}
+	})
+	response := Response{Code: 200, Msg: "Locked", Id: id}
+	respond(conn, response)
+
+	golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+	golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "LOCKED", key, id)
+
+}
+
+func unlock(conn net.Conn, request Request) {
+	if request.Key == "" {
+		errResponse(conn, errBadFormatResponse, fmt.Errorf("unlock command requires a key"))
+		return
+	}
+	if request.Id == 0 {
+		errResponse(conn, errBadFormatResponse, fmt.Errorf("unlock command requires an id"))
+		return
+	}
+	key := request.Key
+	id := request.Id
+	locksLock.RLock()
+	lock, ok := locks[key]
+	locksLock.RUnlock()
+	if !ok {
+		errResponse(conn, errLockNotFoundResponse, nil)
+
+		golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+		golog.Debugf(errLockNotFoundResponse.Msg, ": ", request, "| P ", config.Port)
+		golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s", config.Port, "404", key)
+		return
+	}
+	if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
+		lock.unlock()
+		respond(conn, unlockedResponse)
+
+		golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+		golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
+	} else {
+		respond(conn, notUnlockedResponse)
+
+		golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+		golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
 	}
 }
 
