@@ -10,6 +10,7 @@ import (
 
 	"encoding/json"
 	"fmt"
+	"github.com/iron-io/glock/protocol"
 	"github.com/iron-io/golog"
 	"github.com/stathat/consistent"
 	"io"
@@ -46,26 +47,6 @@ type connection struct {
 	conn     net.Conn
 	reader   *bufio.Reader
 	client   *Client
-}
-
-// todo: move to a common models package or something for both client and server
-type Request struct {
-	Command  string
-	Username string // not sure if we need a username?  A global token might be fine
-	Token    string // for authentication, set in config
-	Key      string
-	Timeout  int
-	Id       int64
-}
-
-type Response struct {
-	Code int
-	Msg  string
-	Id   int64
-}
-
-func (r *Response) Error() string {
-	return fmt.Sprintf("%v: %v", r.Code, r.Msg)
 }
 
 func (c *Client) Size() int {
@@ -208,7 +189,7 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 }
 
 func (c *connection) lock(key string, duration time.Duration) (int64, error) {
-	request := Request{Command: "lock", Key: key, Timeout: int(duration / time.Millisecond)}
+	request := protocol.Request{Command: "lock", Key: key, Timeout: int(duration / time.Millisecond)}
 	response, err := c.sendRequest(request)
 	if err != nil {
 		golog.Errorln("GlockClient -", "lock error: ", err)
@@ -251,7 +232,7 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 	}
 	defer c.releaseConnection(connection)
 
-	request := Request{Command: "unlock", Key: key, Id: id}
+	request := protocol.Request{Command: "unlock", Key: key, Id: id}
 	response, err := connection.sendRequest(request)
 	if err != nil {
 		golog.Errorln("GlockClient - ", "unlock error: ", err)
@@ -267,7 +248,7 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 	return errors.New("Unknown reponse format")
 }
 
-func (c *connection) sendRequest(request Request) (*Response, error) {
+func (c *connection) sendRequest(request protocol.Request) (*protocol.Response, error) {
 	b, err := json.Marshal(request)
 	if err != nil {
 		return nil, &internalError{err}
@@ -286,9 +267,9 @@ func (c *connection) sendRequest(request Request) (*Response, error) {
 	return c.readResponse()
 }
 
-func (c *connection) readResponse() (*Response, error) {
+func (c *connection) readResponse() (*protocol.Response, error) {
 	dec := json.NewDecoder(bufio.NewReader(c.conn))
-	response := Response{}
+	response := protocol.Response{}
 	if err := dec.Decode(&response); err == io.EOF {
 		c.redial() // should we redial here?
 	} else if err != nil {
@@ -333,7 +314,7 @@ func (c *connection) Close() error {
 
 func (c *connection) authenticateConn() error {
 	// Step 1: Pass in username for challenge
-	request := Request{Command: "auth", Username: c.client.username, Token: c.client.password}
+	request := protocol.Request{Command: "auth", Username: c.client.username, Token: c.client.password}
 	response, err := c.sendRequest(request)
 	if err != nil {
 		golog.Errorln("GlockClient -", "auth failed: ", err)

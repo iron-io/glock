@@ -11,9 +11,9 @@ import (
 	"runtime/debug"
 	"strconv"
 	"sync"
-	"sync/atomic"
-	"time"
 
+	"github.com/iron-io/glock/protocol"
+	"github.com/iron-io/glock/semaphore"
 	"github.com/iron-io/golog"
 	"io"
 )
@@ -37,52 +37,8 @@ type timeoutLock struct {
 	lockCount int64
 }
 
-func (l *timeoutLock) lock() bool {
-	if config.LockLimit != 0 {
-		for {
-			count := atomic.LoadInt64(&l.lockCount)
-			if count >= config.LockLimit {
-				golog.Infoln("Reached limit")
-				return false
-			}
-
-			if atomic.CompareAndSwapInt64(&l.lockCount, count, count+1) {
-				break
-			}
-		}
-	}
-	l.mutex.Lock()
-	return true
-}
-
-func (l *timeoutLock) unlock() {
-	l.mutex.Unlock()
-	if config.LockLimit != 0 {
-		atomic.AddInt64(&l.lockCount, -1)
-	}
-}
-
-// Incoming requests
-type Request struct {
-	Command  string
-	Username string // not sure if we need a username?  A global token might be fine
-	Token    string // for authentication, set in config
-	Key      string
-	Timeout  int
-	Id       int64
-}
-
-// Outgoing responses
-type Response struct {
-	Code  int
-	Msg   string
-	Id    int64
-	Error error
-}
-
-var locksLock sync.RWMutex
-var locks = map[string]*timeoutLock{}
 var config GlockConfig
+var glock *semaphore.Glock
 
 func main() {
 	var port int
@@ -119,6 +75,8 @@ func main() {
 
 	golog.Infoln("Glock Server available at port ", config.Port)
 
+	glock = semaphore.NewGlock()
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -130,20 +88,20 @@ func main() {
 }
 
 var (
-	unlockedResponse    = Response{Code: 200, Msg: "Unlocked"}
-	notUnlockedResponse = Response{Code: 204, Msg: "Not unlocked"}
-	pongResponse        = Response{Code: 200, Msg: "Pong"}
-	authorizedResponse  = Response{Code: 200, Msg: "Authorized"}
+	unlockedResponse    = protocol.Response{Code: 200, Msg: "Unlocked"}
+	notUnlockedResponse = protocol.Response{Code: 204, Msg: "Not unlocked"}
+	pongResponse        = protocol.Response{Code: 200, Msg: "Pong"}
+	authorizedResponse  = protocol.Response{Code: 200, Msg: "Authorized"}
 
-	errBadFormatResponse      = Response{Code: 400, Msg: "Invalid parameters for command"}
-	errUnauthorizedResponse   = Response{Code: 403, Msg: "Unauthorized"}
-	errLockNotFoundResponse   = Response{Code: 404, Msg: "Lock not found"}
-	errUnknownCommandResponse = Response{Code: 405, Msg: "Unknown command"}
-	errInternalServerResponse = Response{Code: 500, Msg: "Internal server error"}
-	errLockAtCapacityResponse = Response{Code: 503, Msg: "Lock at capacity"}
+	errBadFormatResponse      = protocol.Response{Code: 400, Msg: "Invalid parameters for command"}
+	errUnauthorizedResponse   = protocol.Response{Code: 403, Msg: "Unauthorized"}
+	errLockNotFoundResponse   = protocol.Response{Code: 404, Msg: "Lock not found"}
+	errUnknownCommandResponse = protocol.Response{Code: 405, Msg: "Unknown command"}
+	errInternalServerResponse = protocol.Response{Code: 500, Msg: "Internal server error"}
+	errLockAtCapacityResponse = protocol.Response{Code: 503, Msg: "Lock at capacity"}
 )
 
-func authenticate(request Request) error {
+func authenticate(request protocol.Request) error {
 	if len(config.Authentication) != 0 {
 		password, ok := config.Authentication[request.Username]
 		if !ok {
@@ -178,7 +136,7 @@ func handleConn(conn net.Conn) {
 	golog.Infoln("Handling new connection", conn)
 	dec := json.NewDecoder(bufio.NewReader(conn))
 	for {
-		var request Request
+		var request protocol.Request
 		if err := dec.Decode(&request); err == io.EOF {
 			golog.Debugf("Got an EOF, breaking and closing this connection.")
 			break
@@ -213,9 +171,9 @@ func handleConn(conn net.Conn) {
 			switch request.Command {
 			case "lock":
 				lock(conn, request)
-				// UNLOCK <key> <id>
 			case "unlock":
 				unlock(conn, request)
+
 			default:
 				errResponse(conn, errUnknownCommandResponse, nil)
 				continue
@@ -225,80 +183,65 @@ func handleConn(conn net.Conn) {
 	}
 }
 
-func lock(conn net.Conn, request Request) {
+func lock(conn net.Conn, request protocol.Request) {
 	if request.Key == "" {
 		errResponse(conn, errBadFormatResponse, fmt.Errorf("lock command requires a key"))
 		return
 	}
 	key := request.Key
 	timeout := request.Timeout
-	locksLock.RLock()
-	lock, ok := locks[key]
-	locksLock.RUnlock()
-	if !ok {
-		// lock doesn't exist; create it
-		locksLock.Lock()
-		lock, ok = locks[key]
-		if !ok {
-			lock = &timeoutLock{}
-			locks[key] = lock
-		}
-		locksLock.Unlock()
+	size := request.Size
+	if size == 0 {
+		size = 1
 	}
 
-	if !lock.lock() {
-		golog.Infoln("ErrResponse here")
-		errResponse(conn, errLockAtCapacityResponse, nil)
-		return
+	lock := glock.GetOrCreateLock(key, 1)
+	id := lock.BLock(timeout)
+	if id == 0 {
+		// id should not be zero
+	} else {
+		response := protocol.Response{Code: 200, Msg: "Locked", Id: id}
+		respond(conn, response)
+
+		golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+		golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "LOCKED", key, id)
 	}
-	id := atomic.AddInt64(&lock.id, 1)
-	time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
-		if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-			lock.unlock()
-			golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
-		}
-	})
-	response := Response{Code: 200, Msg: "Locked", Id: id}
-	respond(conn, response)
-
-	golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
-	golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "LOCKED", key, id)
-
 }
 
-func unlock(conn net.Conn, request Request) {
+func unlock(conn net.Conn, request protocol.Request) {
 	if request.Key == "" {
 		errResponse(conn, errBadFormatResponse, fmt.Errorf("unlock command requires a key"))
 		return
 	}
+
 	if request.Id == 0 {
 		errResponse(conn, errBadFormatResponse, fmt.Errorf("unlock command requires an id"))
 		return
 	}
+
 	key := request.Key
 	id := request.Id
-	locksLock.RLock()
-	lock, ok := locks[key]
-	locksLock.RUnlock()
-	if !ok {
+
+	if lock, ok := glock.GetLock(key); !ok {
 		errResponse(conn, errLockNotFoundResponse, nil)
 
 		golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
 		golog.Debugf(errLockNotFoundResponse.Msg, ": ", request, "| P ", config.Port)
 		golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s", config.Port, "404", key)
 		return
-	}
-	if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
-		lock.unlock()
-		respond(conn, unlockedResponse)
-
-		golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
-		golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
+		// lock not found
 	} else {
-		respond(conn, notUnlockedResponse)
+		// found lock
+		if lock.Unlock(id) {
+			respond(conn, unlockedResponse)
+			golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+			golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
 
-		golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
-		golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
+		} else {
+			respond(conn, notUnlockedResponse)
+			golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+			golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
+		}
 	}
 }
 
@@ -315,14 +258,14 @@ func LoadConfig(configFile string, config interface{}) {
 	golog.Infoln("config:", config)
 }
 
-func errResponse(conn net.Conn, response Response, err error) {
+func errResponse(conn net.Conn, response protocol.Response, err error) {
 	if err != nil {
 		response.Msg = err.Error()
 	}
 	respond(conn, response)
 }
 
-func respond(conn net.Conn, response Response) {
+func respond(conn net.Conn, response protocol.Response) {
 	b, err := json.Marshal(response)
 	if err != nil {
 		golog.Errorln("Error marshalling response:", response, err)
