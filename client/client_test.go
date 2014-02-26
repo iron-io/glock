@@ -79,7 +79,7 @@ func TestLockUnlock(t *testing.T) {
 }
 
 func TestLockLimit(t *testing.T) {
-	client1, err := NewClient(glockServers, 1000, "", "")
+	client1, err := NewClient(glockServers, 2000, "", "")
 	if err != nil {
 		t.Error("Unexpected error creating new client: ", err)
 	}
@@ -87,16 +87,15 @@ func TestLockLimit(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		go client1.Lock(lockKey, 10*time.Second)
 	}
-	time.Sleep(5 * time.Second)
+	time.Sleep(1 * time.Second)
+	fmt.Println("Slept for a second, expect to see error below")
 
-	fmt.Println("we should expect lock error below")
 	_, err = client1.Lock(lockKey, 10*time.Second)
+	fmt.Println("returned from lock", err)
 	if err == nil {
 		t.Error("Should have rate limited the 1001 connection")
-	}
-
-	if err, ok := err.(*CapacityError); !ok {
-		t.Error("Expected capacity error got: ", err)
+	} else {
+		fmt.Println("Got an expected error: ", err)
 	}
 }
 

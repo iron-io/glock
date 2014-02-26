@@ -8,11 +8,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"encoding/json"
+	"fmt"
 	"github.com/iron-io/golog"
 	"github.com/stathat/consistent"
-	"encoding/json"
 	"io"
-	"fmt"
 )
 
 type connectionError struct {
@@ -59,23 +59,14 @@ type Request struct {
 }
 
 type Response struct {
-	Code  int
-	Msg   string
-	Id    int64
-	Error error
+	Code int
+	Msg  string
+	Id   int64
 }
 
-// func (c *Client) ClosePool() error {
-// 	size := len(c.connectionPool)
-// 	for x := 0; x < size; x++ {
-// 		connection := <-c.connectionPool
-// 		err := connection.Close()
-// 		if err != nil {
-// 			return err
-// 		}
-// 	}
-// 	return nil
-// }
+func (r *Response) Error() string {
+	return fmt.Sprintf("%v: %v", r.Code, r.Msg)
+}
 
 func (c *Client) Size() int {
 	var size int
@@ -304,7 +295,12 @@ func (c *connection) readResponse() (*Response, error) {
 		golog.Errorln(err)
 		return nil, err
 	}
-	return &response, nil
+	if response.Code == 200 {
+		return &response, nil
+	} else {
+		return nil, &response
+	}
+
 }
 
 func (c *connection) dial() error {

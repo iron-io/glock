@@ -42,6 +42,7 @@ func (l *timeoutLock) lock() bool {
 		for {
 			count := atomic.LoadInt64(&l.lockCount)
 			if count >= config.LockLimit {
+				golog.Infoln("Reached limit")
 				return false
 			}
 
@@ -246,6 +247,7 @@ func lock(conn net.Conn, request Request) {
 	}
 
 	if !lock.lock() {
+		golog.Infoln("ErrResponse here")
 		errResponse(conn, errLockAtCapacityResponse, nil)
 		return
 	}
