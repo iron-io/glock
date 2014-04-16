@@ -52,16 +52,13 @@ func (g *Glock) CreateLock(key string, size int64) *Lock {
 		l.Resize(size)
 		g.LocksLock.Unlock()
 		return l
-	} else {
-		// lock still does not exist; let's create one
-		l := &Lock{Semaphore: int64(0), SemaphoreLock: sync.Mutex{}, Capacity: size, TimeoutSet: make(map[int64]bool), Id: int64(0), TimeoutSetLock: sync.Mutex{}}
-		l.Cond = sync.NewCond(&l.SemaphoreLock)
-		g.Locks[key] = l
-		g.LocksLock.Unlock()
-		return l
 	}
+	// lock still does not exist; let's create one
+	l := &Lock{Semaphore: int64(0), SemaphoreLock: sync.Mutex{}, Capacity: size, TimeoutSet: make(map[int64]bool), Id: int64(0), TimeoutSetLock: sync.Mutex{}}
+	l.Cond = sync.NewCond(&l.SemaphoreLock)
+	g.Locks[key] = l
 	g.LocksLock.Unlock()
-	return nil
+	return l
 }
 
 // note: no overflow on int64 - we will probably never get to the end of int64
@@ -100,11 +97,9 @@ func (l *Lock) NLock(timeout int) int64 {
 		l.Semaphore++
 		l.SemaphoreLock.Unlock()
 		return l.lock(timeout)
-	} else {
-		l.SemaphoreLock.Unlock()
-		return int64(0)
 	}
 
+	l.SemaphoreLock.Unlock()
 	return int64(0)
 }
 

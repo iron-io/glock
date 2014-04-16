@@ -12,10 +12,11 @@ import (
 	"strconv"
 	"sync"
 
+	"io"
+
 	"github.com/iron-io/glock/protocol"
 	"github.com/iron-io/glock/semaphore"
 	"github.com/iron-io/golog"
-	"io"
 )
 
 type GlockConfig struct {
@@ -222,26 +223,27 @@ func unlock(conn net.Conn, request protocol.Request) {
 	key := request.Key
 	id := request.Id
 
-	if lock, ok := glock.GetLock(key); !ok {
+	lock, ok := glock.GetLock(key)
+
+	if !ok { // no lock found
 		errResponse(conn, errLockNotFoundResponse, nil)
 
 		golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
 		golog.Debugf(errLockNotFoundResponse.Msg, ": ", request, "| P ", config.Port)
 		golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s", config.Port, "404", key)
 		return
-		// lock not found
-	} else {
-		// found lock
-		if lock.Unlock(id) {
-			respond(conn, unlockedResponse)
-			golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
-			golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
+	}
 
-		} else {
-			respond(conn, notUnlockedResponse)
-			golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
-			golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
-		}
+	// found lock
+	if lock.Unlock(id) {
+		respond(conn, unlockedResponse)
+		golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+		golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
+
+	} else {
+		respond(conn, notUnlockedResponse)
+		golog.Debugf("P %-5d | Request:  %+v", config.Port, request)
+		golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
 	}
 }
 

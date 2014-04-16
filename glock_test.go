@@ -5,6 +5,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/iron-io/glock/protocol"
 )
 
 func newServer() net.Conn {
@@ -13,14 +15,14 @@ func newServer() net.Conn {
 	return client
 }
 
-func send(t *testing.T, conn net.Conn, req *Request) *Response {
+func send(t *testing.T, conn net.Conn, req *protocol.Request) *protocol.Response {
 	enc := json.NewEncoder(conn)
 	dec := json.NewDecoder(conn)
 	err := enc.Encode(&req)
 	if err != nil {
 		t.Fatal("unexpected encode error:", err)
 	}
-	var resp Response
+	var resp protocol.Response
 	err = dec.Decode(&resp)
 	if err != nil {
 		t.Fatal("unexpected decode error:", err)
@@ -38,10 +40,10 @@ func TestLockUnlock(t *testing.T) {
 	conn := newServer()
 	defer conn.Close()
 
-	resp := send(t, conn, &Request{Command: "lock", Key: "key", Timeout: 5000})
+	resp := send(t, conn, &protocol.Request{Command: "lock", Key: "key", Timeout: 5000})
 	checkCode(t, resp.Code, 200)
 
-	resp = send(t, conn, &Request{Command: "unlock", Key: "key", Id: resp.Id})
+	resp = send(t, conn, &protocol.Request{Command: "unlock", Key: "key", Id: resp.Id})
 	checkCode(t, resp.Code, 200)
 }
 
@@ -49,12 +51,12 @@ func TestLockTimeout(t *testing.T) {
 	conn := newServer()
 	defer conn.Close()
 
-	resp := send(t, conn, &Request{Command: "lock", Key: "key", Timeout: 500})
+	resp := send(t, conn, &protocol.Request{Command: "lock", Key: "key", Timeout: 500})
 	checkCode(t, resp.Code, 200)
 
-	time.Sleep(1*time.Second)
+	time.Sleep(1 * time.Second)
 
-	resp = send(t, conn, &Request{Command: "unlock", Key: "key", Id: resp.Id})
+	resp = send(t, conn, &protocol.Request{Command: "unlock", Key: "key", Id: resp.Id})
 	checkCode(t, resp.Code, 204)
 }
 
@@ -68,9 +70,9 @@ func TestLockLimit(t *testing.T) {
 	conn := newServer()
 	defer conn.Close()
 
-	resp := send(t, conn, &Request{Command: "lock", Key: "key", Timeout: 500})
+	resp := send(t, conn, &protocol.Request{Command: "lock", Key: "key", Timeout: 500})
 	checkCode(t, resp.Code, 200)
 
-	resp = send(t, conn, &Request{Command: "lock", Key: "key", Timeout: 500})
+	resp = send(t, conn, &protocol.Request{Command: "lock", Key: "key", Timeout: 500})
 	checkCode(t, resp.Code, 503)
 }

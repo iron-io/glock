@@ -127,7 +127,7 @@ func TestConnectionDrop(t *testing.T) {
 
 }
 
-// // This is used to simulate dropped out or bad connections in the connection pool
+// This is used to simulate dropped out or bad connections in the connection pool
 func (c *Client) testClose() {
 	for server, pool := range c.connectionPools {
 		fmt.Println(server)
