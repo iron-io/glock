@@ -23,3 +23,6 @@ config_staging.json
 config.json
 glock
 *.exe
+
+*.iml
+.idea/
