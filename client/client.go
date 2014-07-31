@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/iron-io/golog"
 	"github.com/stathat/consistent"
+	"gopkg.in/inconshreveable/log15.v2"
 )
 
 type connectionError struct {
@@ -74,25 +74,20 @@ func (c *Client) Size() int {
 func NewClient(endpoints []string, size int, username, password string) (*Client, error) {
 	client := &Client{consistent: consistent.New(), connectionPools: make(map[string]chan *connection), endpoints: endpoints,
 		poolSize: size, connectionCount: make(map[string]*int32), username: username, password: password}
-	err := client.initPool()
-	if err != nil {
-		golog.Errorln("GlockClient - ", "Initing pool ", err)
-		return nil, err
-	}
+	client.initPool()
 	client.CheckServerStatus()
 
-	golog.Debugf("Init with connection pool of %d to Glock server", size)
+	log15.Debug("glock client init", "pool_size", size)
 	return client, nil
 }
 
-func (c *Client) initPool() error {
+func (c *Client) initPool() {
 	c.addEndpoints(c.endpoints)
-	return nil
 }
 
 func (c *Client) addEndpoints(endpoints []string) {
 	for _, endpoint := range endpoints {
-		golog.Infoln("GlockClient -", "Attempting to add endpoint:", endpoint)
+		log15.Info("glock client adding endpoint", "endpoint", endpoint)
 		conn, err := dial(endpoint, c.username, c.password)
 		if err == nil {
 			pool := make(chan *connection, c.poolSize)
@@ -107,9 +102,9 @@ func (c *Client) addEndpoints(endpoints []string) {
 			c.countLock.Unlock()
 
 			c.consistent.Add(endpoint)
-			golog.Infoln("GlockClient -", "Added endpoint:", endpoint)
+			log15.Info("glock client added endpoint", "endpoint", endpoint)
 		} else {
-			golog.Errorln("GlockClient -", "Error adding endoint, could not connect, not added. endpoint:", endpoint, "error:", err)
+			log15.Error("glock client error adding endpoint", "endpoint", endpoint, "err", err)
 		}
 	}
 }
@@ -117,10 +112,10 @@ func (c *Client) addEndpoints(endpoints []string) {
 func (c *Client) getConnection(key string) (*connection, error) {
 	server, err := c.consistent.Get(key)
 	if err != nil {
-		golog.Errorln("GlockClient -", "Consistent hashing error, could not get server for key:", key, "error:", err)
+		log15.Error("glock client consistent hashing error", "key", key, "err", err)
 		return nil, err
 	}
-	golog.Debugln("GlockClient -", "in getConn, got server", server, "for key", key)
+	log15.Debug("glock client in getConn", "server", server, "key", key)
 
 	c.poolsLock.RLock()
 	connectionPool, ok := c.connectionPools[server]
@@ -137,10 +132,10 @@ func (c *Client) getConnection(key string) (*connection, error) {
 	case conn := <-connectionPool:
 		return conn, nil
 	default:
-		golog.Infoln("GlockClient - Creating new connection... server:", server)
+		log15.Info("glock client creating new connection", "server", server)
 		conn, err := dial(server, c.username, c.password)
 		if err != nil {
-			golog.Errorln("GlockClient - getConnection - could not connect to:", server, "error:", err)
+			log15.Error("glock client getConnection could not connect", "server", server, "err", err)
 			c.removeEndpoint(server)
 			return nil, err
 		}
@@ -180,12 +175,12 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 	id, err = connection.lock(key, duration)
 	if err != nil {
 		if err, ok := err.(*connectionError); ok {
-			golog.Errorln("GlockClient -", "Connection error, couldn't get lock. Removing endpoint from hash table, server: ", connection.endpoint, " error: ", err)
+			log15.Error("glock client connection error, couldn't get lock. Removing endpoint from hash table", "server", connection.endpoint, "err", err)
 			c.removeEndpoint(connection.endpoint)
 			// todo for evan/treeder, if it is a connection error remove the failed server and then lock again recursively
 			return c.Lock(key, duration)
 		}
-		golog.Errorln("GlockClient -", "Error trying to get lock. endpoint: ", connection.endpoint, " error: ", err)
+		log15.Error("glock client error trying to get lock", "endpoint", connection.endpoint, "err", err)
 		return id, err
 	}
 	return id, nil
@@ -194,13 +189,13 @@ func (c *Client) Lock(key string, duration time.Duration) (id int64, err error) 
 func (c *connection) lock(key string, duration time.Duration) (id int64, err error) {
 	err = c.fprintf("LOCK %s %d\r\n", key, int(duration/time.Millisecond))
 	if err != nil {
-		golog.Errorln("GlockClient -", "lock error: ", err)
+		log15.Error("glock client lock error", "err", err)
 		return id, err
 	}
 
 	splits, err := c.readResponse()
 	if err != nil {
-		golog.Errorln("GlockClient - ", "Lock readResponse error: ", err)
+		log15.Error("glock client lock readResponse", "err", err)
 		return id, err
 	}
 
@@ -213,7 +208,7 @@ func (c *connection) lock(key string, duration time.Duration) (id int64, err err
 }
 
 func (c *Client) removeEndpoint(endpoint string) {
-	golog.Errorln("GlockClient -", "Removing endpoint: ", endpoint)
+	log15.Error("glock client removing endpoint", "endpoint", endpoint)
 	// remove from hash first
 	c.consistent.Remove(endpoint)
 	// then we should get rid of all the connections
@@ -248,13 +243,13 @@ func (c *Client) Unlock(key string, id int64) (err error) {
 
 	err = connection.fprintf("UNLOCK %s %d\r\n", key, id)
 	if err != nil {
-		golog.Errorln("GlockClient - ", "unlock error: ", err)
+		log15.Error("glock client unlock error", "err ", err)
 		return err
 	}
 
 	splits, err := connection.readResponse()
 	if err != nil {
-		golog.Errorln("GlockClient -", "unlock readResponse error: ", err)
+		log15.Error("glock client unlock readResponse error", "err", err)
 		return err
 	}
 
@@ -327,7 +322,7 @@ func (c *connection) Close() error {
 
 func ReadSplits(reader *bufio.Reader) ([]string, error) {
 	response, err := reader.ReadString('\n')
-	golog.Debugln("GlockClient -", "glockResponse: ", response)
+	log15.Debug("glock client glockResponse", "response", response)
 	if err != nil {
 		return nil, &connectionError{err}
 	}

@@ -19,20 +19,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/iron-io/golog"
+	"github.com/iron-io/common"
+	"gopkg.in/inconshreveable/log15.v2"
 )
 
 type GlockConfig struct {
 	Port           int               `json:"port"`
 	LockLimit      int64             `json:"lock_limit"`
 	Authentication map[string]string `json:"authentication"`
-	Logging        LoggingConfig
-}
-
-type LoggingConfig struct {
-	To     string `json:"to"`
-	Level  string `json:"level"`
-	Prefix string `json:"prefix"`
+	Logging        common.LoggingConfig
 }
 
 type timeoutLock struct {
@@ -77,15 +72,14 @@ func main() {
 		config.Logging.To = ""
 		config.Logging.Prefix = ""
 	}
-	golog.SetLogLevel(config.Logging.Level)
-	golog.SetLogLocation(config.Logging.To, config.Logging.Prefix)
+	common.SetLogging(config.Logging)
 
-	golog.Infoln("Glock Server available at port ", config.Port)
+	log15.Info("glock server available", "port", config.Port)
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			golog.Errorln("error accepting", err)
+			log15.Error("error accepting connection", "err", err)
 			return
 		}
 		go authConn(conn)
@@ -118,7 +112,7 @@ func authConn(conn net.Conn) {
 			split := strings.Fields(scanner.Text())
 			cmd := split[0]
 			if cmd != "AUTH" || len(split) < 2 {
-				golog.Errorln("Unauthorized: ", split)
+				log15.Error("unauthorized", "cmd", split)
 				unauthorizeConn(conn)
 				return
 			}
@@ -126,7 +120,7 @@ func authConn(conn net.Conn) {
 			username := split[1]
 			password, ok := config.Authentication[username]
 			if !ok {
-				golog.Errorln("Unauthorized: ", split)
+				log15.Error("unauthorized", "cmd", split)
 				unauthorizeConn(conn)
 				return
 			}
@@ -143,19 +137,19 @@ func authConn(conn net.Conn) {
 				expectedMACBase64 := split[2]
 				expectedMAC, err := base64.StdEncoding.DecodeString(expectedMACBase64)
 				if err != nil {
-					golog.Errorln("Unauthorized: ", split)
+					log15.Error("unauthorized", "cmd", split)
 					unauthorizeConn(conn)
 					return
 				}
 
 				if CheckMAC([]byte(password), expectedMAC, authKey) {
-					golog.Debugln("Authorized: ", split)
+					log15.Debug("authorized", "cmd", split)
 					conn.Write(authorizedResponse)
 					break
 				}
 				fallthrough
 			default:
-				golog.Errorln("Unauthorized: ", split)
+				log15.Error("unauthorized", "cmd", split)
 				unauthorizeConn(conn)
 				return
 			}
@@ -172,7 +166,7 @@ func handleConn(conn net.Conn) {
 		// make sure a panic doesn't take down the whole server
 		err := recover()
 		if err != nil {
-			golog.Errorf("recovered from panic: %v\n%s\n", err, debug.Stack())
+			log15.Error("recovered from panic", "err", err, "stack", string(debug.Stack()))
 		}
 	}()
 
@@ -182,7 +176,6 @@ func handleConn(conn net.Conn) {
 
 		if split[0] == "PING" {
 			conn.Write(pongResponse)
-			golog.Debugf("PING PONG")
 			continue
 		}
 
@@ -200,7 +193,7 @@ func handleConn(conn net.Conn) {
 
 			if err != nil {
 				conn.Write(errBadFormat)
-				golog.Errorln(string(errBadFormat), ": ", split)
+				log15.Error("bad command format", "cmd", split)
 				continue
 			}
 			locksLock.RLock()
@@ -225,13 +218,12 @@ func handleConn(conn net.Conn) {
 			time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() {
 				if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 					lock.unlockMutex()
-					golog.Debugf("P %-5d | Timedout: %-12d | Key:  %-15s | Id: %d", config.Port, timeout, key, id)
+					log15.Debug("lock timed out", "timeout", timeout, "key", key, "id", id)
 				}
 			})
 			fmt.Fprintf(conn, "LOCKED %v\n", id)
 
-			golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Timeout: %dms", config.Port, cmd, key, timeout)
-			golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "LOCKED", key, id)
+			log15.Debug("locked", "cmd", split, "timeout", timeout, "key", key, "id", id)
 
 		// UNLOCK <key> <id>
 		case "UNLOCK":
@@ -239,7 +231,7 @@ func handleConn(conn net.Conn) {
 
 			if err != nil {
 				conn.Write(errBadFormat)
-				golog.Errorln(string(errBadFormat), ": ", split)
+				log15.Error("bad command format", "cmd", split)
 				continue
 			}
 			locksLock.RLock()
@@ -247,28 +239,21 @@ func handleConn(conn net.Conn) {
 			locksLock.RUnlock()
 			if !ok {
 				conn.Write(errLockNotFound)
-
-				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
-				golog.Errorln(string(errLockNotFound), ": ", split, "| P ", config.Port)
-				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s", config.Port, "404", key)
+				log15.Error("lock not found", "cmd", split, "key", key, "id", id)
 				continue
 			}
 			if atomic.CompareAndSwapInt64(&lock.id, id, id+1) {
 				lock.unlockMutex()
 				conn.Write(unlockedResponse)
-
-				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
-				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "UNLOCKED", key, id)
+				log15.Debug("unlocked", "cmd", split, "key", key, "id", id)
 			} else {
 				conn.Write(notUnlockedResponse)
-
-				golog.Debugf("P %-5d | Request:  %-12s | Key:  %-15s | Id: %d", config.Port, cmd, key, id)
-				golog.Debugf("P %-5d | Response: %-12s | Key:  %-15s | Id: %d", config.Port, "NOT_UNLOCKED", key, id)
+				log15.Debug("not unlocked", "cmd", split, "key", key, "id", id)
 			}
 
 		default:
 			conn.Write(errUnknownCommand)
-			golog.Errorln(string(errUnknownCommand), ": ", split)
+			log15.Error(string(errUnknownCommand), ": ", split)
 			continue
 		}
 	}
@@ -284,7 +269,7 @@ func LoadConfig(configFile string, config interface{}) {
 	if err != nil {
 		log.Fatalln("Couldn't unmarshal config!", err)
 	}
-	golog.Infoln("config:", config)
+	log15.Info("loaded config", "config", config)
 }
 
 func (l *timeoutLock) lockMutex() bool {

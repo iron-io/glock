@@ -1,27 +1,35 @@
 package glock
 
 import (
-	"fmt"
 	"sync/atomic"
 	"time"
 
-	"github.com/iron-io/golog"
+	"gopkg.in/inconshreveable/log15.v2"
 )
 
 func (c *Client) CheckServerStatus() {
-	ticker := time.Tick(60 * time.Second)
 	go func() {
+		ticker := time.Tick(60 * time.Second)
 		for _ = range ticker {
-			down := downServers(c.endpoints, c.consistent.Members())
+			members := c.consistent.Members()
+			down := downServers(c.endpoints, members)
 			if len(down) > 0 {
 				c.addEndpoints(down)
 			}
 
-			serverStatus := "Glock Server Status: \n"
-			for _, server := range c.consistent.Members() {
-				serverStatus += fmt.Sprintln(server, ": ", "available - ", len(c.connectionPools[server]), "total - ", int(atomic.LoadInt32(c.connectionCount[server]))+len(c.connectionPools[server]))
+			serverStatuses := make([]interface{}, 4*len(members))
+			for i, server := range members {
+				c.poolsLock.RLock()
+				availableConns := len(c.connectionPools[server])
+				c.poolsLock.RUnlock()
+				totalConns := int(atomic.LoadInt32(c.connectionCount[server])) + availableConns
+				j := 4 * i
+				serverStatuses[j+0] = server + "_available"
+				serverStatuses[j+1] = availableConns
+				serverStatuses[j+2] = server + "_total"
+				serverStatuses[j+3] = totalConns
 			}
-			golog.Infoln(serverStatus, len(down), "down servers: ", down)
+			log15.Info("glock server statuses", serverStatuses...)
 		}
 	}()
 }
