@@ -22,4 +22,5 @@ config_development.json
 config_staging.json
 config.json
 glock
+glock_*
 *.exe
