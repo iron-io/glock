@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/stathat/consistent"
 	"gopkg.in/inconshreveable/log15.v2"
+	"stathat.com/c/consistent"
 )
 
 type connectionError struct {
